@@ -9,6 +9,7 @@ services:
       - ./src:/app/src:ro
     environment:
       UPVECTOR_LOG_LEVEL: debug
+      UPVECTOR_LOG_FORMAT: text
 
   redis:
     ports:

@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    allow:
+      - dependency-name: "@upstash/vector"
+    commit-message:
+      prefix: "deps:"
+    labels:
+      - "dependencies"
+      - "sdk-compat"
+    open-pull-requests-limit: 1

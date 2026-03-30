@@ -389,12 +389,13 @@ Like SRH's file mode, support a JSON config mapping tokens to separate Redis ins
 
 ### Phase 6 — Production Hardening
 
-- [ ] Graceful shutdown
-- [ ] Connection retry / reconnect
-- [ ] Request timeout configuration
-- [ ] Rate limiting (optional)
-- [ ] Structured JSON logging
-- [ ] Prometheus metrics endpoint (optional)
+- [x] Graceful shutdown (request draining via `await server.stop()`, configurable timeout, double-signal force exit)
+- [x] Connection retry / reconnect (Bun.redis `autoReconnect` + `onconnect`/`onclose` event logging)
+- [x] Request timeout configuration (`UPVECTOR_REQUEST_TIMEOUT`, Promise.race middleware)
+- [x] Rate limiting — **deferred** (self-hosted proxy; use reverse proxy like nginx/Caddy instead)
+- [x] Structured JSON logging (`src/logger.ts`, JSON/text format, request IDs, stderr for warn/error)
+- [x] Prometheus metrics endpoint (`GET /metrics`, opt-in via `UPVECTOR_METRICS=true`, counters + histograms)
+- [x] Enhanced health check (`GET /health` with Redis probe + shutdown state, `GET /` returns 503 during shutdown)
 
 ### Phase 7 — Deferred (only if needed)
 

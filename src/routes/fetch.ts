@@ -1,0 +1,83 @@
+import { Hono } from "hono"
+import { z } from "zod"
+import { getClient } from "../redis"
+import { parseVectorKey, vectorKey, vectorPrefix } from "../translate/keys"
+import { decodeVectorBase64 } from "../translate/vectors"
+import type { Vector } from "../types"
+
+const FetchBody = z.object({
+	ids: z.array(z.union([z.string(), z.number()]).transform(String)).optional(),
+	prefix: z.string().optional(),
+	includeMetadata: z.boolean().default(false),
+	includeVectors: z.boolean().default(false),
+	includeData: z.boolean().default(false),
+})
+
+export const fetchRoutes = new Hono()
+
+fetchRoutes.post("/fetch/:namespace?", async (c) => {
+	const body = await c.req.json()
+	const parsed = FetchBody.parse(body)
+	const ns = c.req.param("namespace") ?? ""
+	const redis = getClient()
+
+	// Fetch by IDs (default path, also used when both ids and prefix are given)
+	if (parsed.ids) {
+		const results = await Promise.all(
+			parsed.ids.map(async (id): Promise<Vector | null> => {
+				const hash = await redis.hgetall(vectorKey(ns, id))
+				if (!hash || Object.keys(hash).length === 0) return null
+				return buildVector(hash, id, parsed)
+			}),
+		)
+		return c.json({ result: results })
+	}
+
+	// Fetch by prefix
+	if (parsed.prefix) {
+		const pattern = `${vectorPrefix(ns)}${parsed.prefix}*`
+		const keys = await scanAll(redis, pattern)
+		const results = await Promise.all(
+			keys.map(async (key) => {
+				const hash = await redis.hgetall(key)
+				if (!hash || Object.keys(hash).length === 0) return null
+				const parsed_key = parseVectorKey(key)
+				return buildVector(hash, parsed_key?.id ?? hash.id, parsed)
+			}),
+		)
+		return c.json({ result: results.filter(Boolean) })
+	}
+
+	// Neither ids nor prefix
+	return c.json({ result: [] })
+})
+
+function buildVector(
+	hash: Record<string, string>,
+	id: string,
+	opts: { includeVectors: boolean; includeMetadata: boolean; includeData: boolean },
+): Vector {
+	const vec: Vector = { id }
+	if (opts.includeVectors && hash._vec) {
+		vec.vector = decodeVectorBase64(hash._vec)
+	}
+	if (opts.includeMetadata && hash.metadata) {
+		vec.metadata = JSON.parse(hash.metadata)
+	}
+	if (opts.includeData && hash.data) {
+		vec.data = hash.data
+	}
+	return vec
+}
+
+async function scanAll(redis: ReturnType<typeof getClient>, pattern: string): Promise<string[]> {
+	const keys: string[] = []
+	let cursor = "0"
+	do {
+		const result = await redis.scan(Number(cursor), "MATCH", pattern, "COUNT", 100)
+		const [next, batch] = result as unknown as [string, string[]]
+		keys.push(...batch)
+		cursor = String(next)
+	} while (cursor !== "0")
+	return keys
+}

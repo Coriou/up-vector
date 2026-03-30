@@ -1,5 +1,5 @@
 [test]
-preload = []
+# preload = []
 timeout = 10000
 
 [install]
