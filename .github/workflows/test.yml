@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven/setup-bun@v2
+      - uses: oven-sh/setup-bun@v2
 
       - name: Cache Bun dependencies
         uses: actions/cache@v4
@@ -48,7 +48,7 @@ jobs:
       UPVECTOR_REDIS_URL: redis://localhost:6379
     steps:
       - uses: actions/checkout@v4
-      - uses: oven/setup-bun@v2
+      - uses: oven-sh/setup-bun@v2
 
       - name: Cache Bun dependencies
         uses: actions/cache@v4
