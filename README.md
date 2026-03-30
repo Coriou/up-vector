@@ -81,8 +81,10 @@ bun lint         # Biome check
 See [PLAN.md](./PLAN.md) for full implementation details.
 
 ```
-@upstash/vector SDK → up-vector (Hono/Bun) → Redis Stack (RediSearch HNSW)
+@upstash/vector SDK → up-vector (Hono/Bun + Bun.redis) → Redis Stack (RediSearch HNSW)
 ```
+
+**Stack:** Hono v4 + Bun.redis (native, zero-dep) + Zod validation. No ioredis, no node-redis — Bun's built-in Redis client supports raw `FT.*` commands via `send()` and is 7.9x faster.
 
 ## License
 

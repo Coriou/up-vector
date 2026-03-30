@@ -50,7 +50,7 @@ Same spirit as [SRH](https://github.com/hiett/serverless-redis-http) (serverless
 |-------|--------|---------|-----|
 | Runtime | Bun | latest (1.2+) | Native TS, fastest JS runtime, built-in test runner |
 | HTTP | Hono | v4 | Lightweight, fast, great middleware, portable |
-| Redis client | ioredis | v5 | Battle-tested, excellent raw command support via `.call()` |
+| Redis client | Bun.redis | built-in | Native Bun Redis client, 7.9x faster than Bun.redis, `send()` for raw FT.* commands, zero deps |
 | Validation | Zod | v3 | Request body validation, type inference |
 | Linting/Format | Biome | v1 | Fast, modern, replaces ESLint+Prettier |
 | Testing | Bun test | built-in | Fast, Jest-compatible API |
@@ -267,7 +267,7 @@ up-vector/
 │   │   ├── auth.ts              # Bearer token validation
 │   │   ├── error-handler.ts     # Global error → Upstash error envelope
 │   │   └── logger.ts            # Request logging
-│   ├── redis.ts                 # ioredis client, connection management
+│   ├── redis.ts                 # Bun.redis client, connection management
 │   ├── routes/
 │   │   ├── health.ts            # GET /
 │   │   ├── upsert.ts            # POST /upsert[/{ns}]
@@ -349,7 +349,7 @@ Like SRH's file mode, support a JSON config mapping tokens to separate Redis ins
 - [x] Project setup (package.json, tsconfig, Docker, Biome)
 - [x] PLAN.md
 - [ ] Hono server with auth middleware and error handling
-- [ ] Redis connection with ioredis
+- [ ] Redis connection with Bun.redis
 - [ ] Vector encode/decode utilities
 - [ ] Key naming module
 - [ ] Health endpoint (`GET /`)
