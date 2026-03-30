@@ -1,0 +1,29 @@
+services:
+  up-vector:
+    build: .
+    ports:
+      - "${UPVECTOR_PORT:-8080}:8080"
+    environment:
+      UPVECTOR_TOKEN: ${UPVECTOR_TOKEN:?Set UPVECTOR_TOKEN in .env}
+      UPVECTOR_REDIS_URL: redis://redis:6379
+      UPVECTOR_PORT: "8080"
+      UPVECTOR_METRIC: ${UPVECTOR_METRIC:-COSINE}
+      UPVECTOR_LOG_LEVEL: ${UPVECTOR_LOG_LEVEL:-info}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis:
+    image: redis/redis-stack-server:latest
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  redis-data:

@@ -1,0 +1,15 @@
+# Dev overrides — use with: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+services:
+  up-vector:
+    build:
+      context: .
+      target: builder
+    command: ["bun", "run", "--watch", "src/index.ts"]
+    volumes:
+      - ./src:/app/src:ro
+    environment:
+      UPVECTOR_LOG_LEVEL: debug
+
+  redis:
+    ports:
+      - "6379:6379"
