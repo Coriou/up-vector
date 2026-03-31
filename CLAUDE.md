@@ -3,7 +3,7 @@
 Self-hosted, Upstash Vector-compatible HTTP proxy backed by Redis Stack.
 Drop-in replacement for `@upstash/vector` — point the SDK at your own server instead of Upstash's cloud.
 
-Same spirit as [SRH](https://github.com/hiett/serverless-redis-http), but for vectors.
+Sibling project to [up-redis](https://github.com/Coriou/up-redis) (same idea, but for vectors).
 
 ## Tech Stack
 
@@ -158,4 +158,4 @@ See `PLAN.md` for the full architecture and phase breakdown.
 - [@upstash/vector SDK](https://github.com/upstash/vector-js) — client SDK, also our compatibility test target
 - [RediSearch vector search](https://redis.io/docs/latest/develop/interact/search-and-query/query/vector-search/)
 - [RediSearch FT.CREATE](https://redis.io/docs/latest/commands/ft.create/) / [FT.SEARCH](https://redis.io/docs/latest/commands/ft.search/)
-- [SRH](https://github.com/hiett/serverless-redis-http) — sibling project (same pattern, different protocol)
+- [up-redis](https://github.com/Coriou/up-redis) — sibling project (same pattern, but for standard Redis commands)

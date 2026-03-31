@@ -2,7 +2,7 @@
 
 A self-hosted, Upstash Vector-compatible HTTP proxy backed by Redis Stack. Drop-in replacement for `@upstash/vector` — point the SDK at your own server instead of Upstash's cloud.
 
-Same spirit as [SRH](https://github.com/hiett/serverless-redis-http) (serverless-redis-http), but for vectors.
+Sibling project to [up-redis](https://github.com/Coriou/up-redis) (same idea, but for vectors).
 
 ---
 
@@ -37,7 +37,7 @@ Same spirit as [SRH](https://github.com/hiett/serverless-redis-http) (serverless
 
 **Key design decisions:**
 
-1. **Separate from SRH** — Different protocol (resource REST vs command-array forwarding), different concerns. Clean separation. Can run alongside SRH against the same Redis Stack, or standalone with its own.
+1. **Separate from up-redis** — Different protocol (resource REST vs command-array forwarding), different concerns. Clean separation. Can run alongside up-redis against the same Redis Stack, or standalone with its own.
 2. **Own Redis Stack in compose** — Self-contained, portable. One `docker compose up` and it works. Can also connect to an external Redis Stack via env var.
 3. **Bun runtime** — Native TypeScript, fastest JS runtime, built-in test runner.
 4. **Hono framework** — Lightweight, fast, excellent middleware, portable (Bun/Node/Deno/Workers).
@@ -99,7 +99,7 @@ Every response follows the Upstash convention:
 
 ### Authentication
 
-`Authorization: Bearer <token>` header on every request. Token validated against config (env var or file, same pattern as SRH).
+`Authorization: Bearer <token>` header on every request. Token validated against config (env var or file, same pattern as up-redis).
 
 ---
 
@@ -338,7 +338,7 @@ up-vector/
 
 ### Multi-token mode (future)
 
-Like SRH's file mode, support a JSON config mapping tokens to separate Redis instances / index configs. Not needed for v1.
+Like up-redis's file mode, support a JSON config mapping tokens to separate Redis instances / index configs. Not needed for v1.
 
 ---
 
@@ -403,7 +403,7 @@ Like SRH's file mode, support a JSON config mapping tokens to separate Redis ins
 - [ ] Sparse vector support
 - [ ] Hybrid search with fusion algorithms
 - [ ] Resumable queries (stateful cursors)
-- [ ] Multi-token / multi-index mode (SRH file-mode equivalent)
+- [ ] Multi-token / multi-index mode (up-redis file-mode equivalent)
 - [ ] RedisJSON-based metadata indexing (v2 filter upgrade)
 
 ---
@@ -494,9 +494,9 @@ Spin up Redis Stack (in Docker or locally), run operations end-to-end:
 - Range pagination
 - Reset
 
-### 3. Compatibility Tests (the SRH approach)
+### 3. Compatibility Tests (the up-redis approach)
 
-Clone `upstash/vector-js`, configure it to point at up-vector, run its test suite. This is the ultimate compatibility check — same strategy that makes SRH reliable.
+Clone `upstash/vector-js`, configure it to point at up-vector, run its test suite. This is the ultimate compatibility check — same strategy that makes up-redis reliable.
 
 The `@upstash/vector` test suite will need some tests excluded:
 - Embedding-related tests (we defer `/upsert-data`, `/query-data`)
@@ -511,7 +511,7 @@ on:
   push:
     paths: [src/**, tests/**, package.json, Dockerfile]
   schedule:
-    - cron: '0 12 * * *'  # Daily, same as SRH
+    - cron: '0 12 * * *'  # Daily, same as up-redis
 
 jobs:
   test:
@@ -592,9 +592,9 @@ const results = await index.query({
 })
 ```
 
-### With SRH (side-by-side in Coolify)
+### With up-redis (side-by-side in Coolify)
 
-Both services can share the same Redis Stack instance, or run independently:
+Both services can share the same Redis Stack instance, or run independently — up-redis handles standard Redis commands, up-vector handles vector search:
 
 ```yaml
 # Shared Redis Stack setup
@@ -602,12 +602,11 @@ services:
   redis-stack:
     image: redis/redis-stack-server:latest
 
-  srh:
-    image: ghcr.io/coriou/srh:latest
+  up-redis:
+    image: ghcr.io/coriou/up-redis:latest
     environment:
-      SRH_MODE: env
-      SRH_TOKEN: ${SRH_TOKEN}
-      SRH_CONNECTION_STRING: redis://redis-stack:6379
+      UPREDIS_TOKEN: ${UPREDIS_TOKEN}
+      UPREDIS_REDIS_URL: redis://redis-stack:6379
 
   up-vector:
     build: ./up-vector
@@ -625,4 +624,4 @@ services:
 - [Redis Stack vector search](https://redis.io/docs/latest/develop/interact/search-and-query/query/vector-search/)
 - [RediSearch FT.CREATE](https://redis.io/docs/latest/commands/ft.create/)
 - [RediSearch FT.SEARCH](https://redis.io/docs/latest/commands/ft.search/)
-- [hiett/serverless-redis-http](https://github.com/hiett/serverless-redis-http)
+- [up-redis](https://github.com/Coriou/up-redis) — sibling project (same pattern, but for standard Redis commands)

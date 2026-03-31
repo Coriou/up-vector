@@ -6,7 +6,7 @@
 
 Self-hosted [Upstash Vector](https://upstash.com/docs/vector/overall/getstarted)-compatible HTTP proxy backed by [Redis Stack](https://redis.io/docs/latest/operate/oss_and_stack/install/install-stack/).
 
-Drop-in replacement for `@upstash/vector` — point the SDK at your own server instead of Upstash's cloud. Uses Redis Stack (RediSearch) for HNSW vector indexing. Same idea as [SRH](https://github.com/hiett/serverless-redis-http), but for vectors.
+Drop-in replacement for `@upstash/vector` — point the SDK at your own server instead of Upstash's cloud. Uses Redis Stack (RediSearch) for HNSW vector indexing. Sibling project to [up-redis](https://github.com/Coriou/up-redis) (same idea, but for vectors).
 
 ## Quick Start
 
@@ -221,21 +221,20 @@ cp .env.example .env     # Set UPVECTOR_TOKEN
 docker compose up -d     # Starts up-vector + Redis Stack
 ```
 
-### With SRH (side-by-side)
+### With up-redis (side-by-side)
 
-Both services can share the same Redis Stack instance:
+Both services can share the same Redis Stack instance — up-redis handles standard Redis commands, up-vector handles vector search:
 
 ```yaml
 services:
   redis-stack:
     image: redis/redis-stack-server:latest
 
-  srh:
-    image: ghcr.io/hiett/serverless-redis-http:latest
+  up-redis:
+    image: ghcr.io/coriou/up-redis:latest
     environment:
-      SRH_MODE: env
-      SRH_TOKEN: ${SRH_TOKEN}
-      SRH_CONNECTION_STRING: redis://redis-stack:6379
+      UPREDIS_TOKEN: ${UPREDIS_TOKEN}
+      UPREDIS_REDIS_URL: redis://redis-stack:6379
 
   up-vector:
     image: ghcr.io/coriou/up-vector:latest
