@@ -1,8 +1,8 @@
 services:
   up-vector:
     build: .
-    ports:
-      - "${UPVECTOR_PORT:-8080}:8080"
+    expose:
+      - "8080"
     environment:
       UPVECTOR_TOKEN: ${UPVECTOR_TOKEN:?Set UPVECTOR_TOKEN in .env}
       UPVECTOR_REDIS_URL: redis://redis:6379
