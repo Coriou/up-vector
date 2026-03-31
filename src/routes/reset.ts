@@ -1,7 +1,7 @@
 import { type Context, Hono } from "hono"
 import { getClient } from "../redis"
 import { dropIndex } from "../translate/index"
-import { NS_REGISTRY, deleteKeysByPattern, vectorPrefix } from "../translate/keys"
+import { deleteKeysByPattern, NS_REGISTRY, vectorPrefix } from "../translate/keys"
 
 export const resetRoutes = new Hono()
 

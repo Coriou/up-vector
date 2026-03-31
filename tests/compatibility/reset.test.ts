@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { awaitIndexed, createIndex, randomID, randomVector } from "./setup"
+import { createIndex, randomID, randomVector } from "./setup"
 
 const index = createIndex()
 

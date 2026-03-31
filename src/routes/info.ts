@@ -2,7 +2,7 @@ import { type Context, Hono } from "hono"
 import { config } from "../config"
 import { getClient } from "../redis"
 import { getDetectedDimension, parseNumDocs } from "../translate/index"
-import { NS_REGISTRY, indexName } from "../translate/keys"
+import { indexName, NS_REGISTRY } from "../translate/keys"
 
 export const infoRoutes = new Hono()
 

@@ -9,7 +9,7 @@ import { encodeVector, encodeVectorBase64 } from "../translate/vectors"
 const VectorSchema = z.object({
 	id: z.union([z.string(), z.number()]).transform(String),
 	vector: z.array(z.number()),
-	metadata: z.record(z.unknown()).optional(),
+	metadata: z.record(z.string(), z.unknown()).optional(),
 	data: z.string().optional(),
 })
 

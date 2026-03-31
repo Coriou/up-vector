@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
-	NS_REGISTRY,
 	indexName,
+	NS_REGISTRY,
 	parseVectorKey,
 	vectorKey,
 	vectorPrefix,

@@ -2,10 +2,10 @@ import { evaluate } from "./evaluator"
 import { parse } from "./parser"
 import { tokenize } from "./tokenizer"
 
-export { tokenize } from "./tokenizer"
+export { evaluate, globToRegex, resolveField } from "./evaluator"
 export { parse } from "./parser"
-export { evaluate, resolveField, globToRegex } from "./evaluator"
-export type { Token, TokenType, FilterNode, Value } from "./types"
+export { tokenize } from "./tokenizer"
+export type { FilterNode, Token, TokenType, Value } from "./types"
 
 export function evaluateFilter(filter: string, metadata: Record<string, unknown>): boolean {
 	const tokens = tokenize(filter)

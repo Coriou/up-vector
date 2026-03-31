@@ -3,7 +3,7 @@ import { Index } from "@upstash/vector"
 export const TOKEN = process.env.UPVECTOR_TOKEN ?? "test-token-123"
 export const URL = process.env.UPVECTOR_URL ?? "http://localhost:8080"
 
-export function createIndex() {
+export function createIndex(): Index {
 	return new Index({ url: URL, token: TOKEN })
 }
 

@@ -152,6 +152,7 @@ export function globToRegex(pattern: string): RegExp {
 				i++
 			}
 			regex += "]"
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: literal regex metacharacters, not template
 		} else if (".+^${}()|\\".includes(ch)) {
 			regex += `\\${ch}`
 		} else {
