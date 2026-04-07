@@ -2,10 +2,12 @@ import type { MiddlewareHandler } from "hono";
 import { log } from "../logger";
 import { recordRequest } from "../metrics";
 
-// Extract the base route (first path segment) for metric labeling
+// Extract the base route (first path segment) for metric labeling.
+// Falls back to "/unknown" to prevent label cardinality explosion
+// and Prometheus format injection from arbitrary paths.
 function routeLabel(path: string): string {
   const match = path.match(/^\/([a-z-]+)/);
-  return match ? `/${match[1]}` : path;
+  return match ? `/${match[1]}` : "/unknown";
 }
 
 export const loggerMiddleware: MiddlewareHandler = async (c, next) => {

@@ -676,3 +676,27 @@ describe("evaluator edge cases", () => {
     expect(evaluateFilter("active = false", { active: false })).toBe(true);
   });
 });
+
+describe("filter hardening", () => {
+  test("rejects filter strings exceeding max length", () => {
+    const longFilter = `${"x".repeat(8193)} = 'a'`;
+    expect(() => tokenize(longFilter)).toThrow("Filter string too long");
+  });
+
+  test("rejects deeply nested parentheses", () => {
+    // Build a filter with 101 nested parens
+    const open = "(".repeat(101);
+    const close = ")".repeat(101);
+    const deepFilter = `${open}x = 1${close}`;
+    expect(() => parse(tokenize(deepFilter))).toThrow("too deeply nested");
+  });
+
+  test("accepts moderately nested parentheses", () => {
+    // 10 levels of nesting should be fine
+    const open = "(".repeat(10);
+    const close = ")".repeat(10);
+    const filter = `${open}x = 1${close}`;
+    const ast = parse(tokenize(filter));
+    expect(evaluate(ast, { x: 1 })).toBe(true);
+  });
+});

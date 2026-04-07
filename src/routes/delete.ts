@@ -16,6 +16,7 @@ const DeleteBody = z
   .object({
     ids: z
       .array(z.union([z.string(), z.number()]).transform(String))
+      .max(1000)
       .optional(),
     prefix: z.string().optional(),
     filter: z.string().optional(),

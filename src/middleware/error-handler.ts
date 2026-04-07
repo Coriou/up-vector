@@ -21,6 +21,11 @@ export const errorHandler: ErrorHandler = (err, c) => {
     return c.json({ error: message, status: 400 }, 400);
   }
 
+  // Malformed JSON body — return 400, not 500
+  if (err instanceof SyntaxError) {
+    return c.json({ error: "Invalid JSON body", status: 400 }, 400);
+  }
+
   // Input validation errors (from validateNamespace, validateId, etc.)
   if (err instanceof Error && isValidationError(err)) {
     return c.json({ error: err.message, status: 400 }, 400);

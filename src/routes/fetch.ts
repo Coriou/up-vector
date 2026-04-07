@@ -11,7 +11,10 @@ import { decodeVectorBase64 } from "../translate/vectors";
 import type { Vector } from "../types";
 
 const FetchBody = z.object({
-  ids: z.array(z.union([z.string(), z.number()]).transform(String)).optional(),
+  ids: z
+    .array(z.union([z.string(), z.number()]).transform(String))
+    .max(1000)
+    .optional(),
   prefix: z.string().optional(),
   includeMetadata: z.boolean().default(false),
   includeVectors: z.boolean().default(false),

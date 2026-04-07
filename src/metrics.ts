@@ -29,6 +29,16 @@ function getHistogram(method: string): HistogramData {
   return h;
 }
 
+/** Sanitize a label value for Prometheus text exposition format */
+function sanitizeLabel(value: string): string {
+  return value.replace(/[\\"/\n]/g, (ch) => {
+    if (ch === "\\") return "\\\\";
+    if (ch === '"') return '\\"';
+    if (ch === "\n") return "\\n";
+    return ch;
+  });
+}
+
 export function recordRequest(
   method: string,
   status: number,
@@ -69,7 +79,7 @@ export function formatMetrics(): string {
   for (const [key, count] of requestCounts) {
     const [method, status, route] = key.split(":");
     lines.push(
-      `http_requests_total{method="${method}",status="${status}",route="${route || "/"}"} ${count}`,
+      `http_requests_total{method="${sanitizeLabel(method)}",status="${sanitizeLabel(status)}",route="${sanitizeLabel(route || "/")}"} ${count}`,
     );
   }
 
@@ -80,7 +90,7 @@ export function formatMetrics(): string {
   lines.push("# TYPE http_request_duration_seconds histogram");
   for (const [key, h] of durationHistograms) {
     const [method, route] = key.split(":");
-    const labels = `method="${method}",route="${route || "/"}"`;
+    const labels = `method="${sanitizeLabel(method)}",route="${sanitizeLabel(route || "/")}"`;
     let cumulative = 0;
     for (let i = 0; i < DURATION_BUCKETS.length; i++) {
       cumulative += h.buckets[i];

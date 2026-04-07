@@ -15,14 +15,25 @@ import {
 } from "../translate/keys";
 import { encodeVector, encodeVectorBase64 } from "../translate/vectors";
 
+const finiteNumber = z.number().refine((n) => Number.isFinite(n), {
+  message: "Vector values must be finite numbers (no NaN or Infinity)",
+});
+
 const VectorSchema = z.object({
   id: z.union([z.string(), z.number()]).transform(String),
-  vector: z.array(z.number()),
+  vector: z.array(finiteNumber),
   metadata: z.record(z.string(), z.unknown()).optional(),
   data: z.string().optional(),
 });
 
-const UpsertBody = z.union([VectorSchema, z.array(VectorSchema)]);
+const MAX_BATCH_SIZE = 1000;
+
+const UpsertBody = z.union([
+  VectorSchema,
+  z.array(VectorSchema).max(MAX_BATCH_SIZE, {
+    message: `Batch size must not exceed ${MAX_BATCH_SIZE}`,
+  }),
+]);
 
 export const upsertRoutes = new Hono();
 

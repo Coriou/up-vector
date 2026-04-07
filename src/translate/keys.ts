@@ -3,17 +3,28 @@ import { getClient } from "../redis";
 export const NS_REGISTRY = "_ns_registry";
 const MAX_SCAN_ITERATIONS = 10_000;
 
+const MAX_NAMESPACE_LENGTH = 256;
+const MAX_ID_LENGTH = 1024;
+
 /** Validates that a namespace name won't corrupt the key scheme */
 export function validateNamespace(ns: string): void {
   if (ns.includes(":")) {
     throw new Error("Namespace name must not contain ':'");
   }
+  if (ns.length > MAX_NAMESPACE_LENGTH) {
+    throw new Error(
+      `Namespace name must not exceed ${MAX_NAMESPACE_LENGTH} characters`,
+    );
+  }
 }
 
-/** Validates that an ID is non-empty */
+/** Validates that an ID is non-empty and not too long */
 export function validateId(id: string): void {
   if (id === "") {
     throw new Error("Vector ID must not be empty");
+  }
+  if (id.length > MAX_ID_LENGTH) {
+    throw new Error(`Vector ID must not exceed ${MAX_ID_LENGTH} characters`);
   }
 }
 

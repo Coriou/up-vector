@@ -102,4 +102,22 @@ describe("validateId", () => {
   test("rejects empty string ID", () => {
     expect(() => validateId("")).toThrow("must not be empty");
   });
+
+  test("rejects ID exceeding max length", () => {
+    expect(() => validateId("x".repeat(1025))).toThrow("must not exceed");
+  });
+
+  test("accepts ID at max length", () => {
+    expect(() => validateId("x".repeat(1024))).not.toThrow();
+  });
+});
+
+describe("validateNamespace length", () => {
+  test("rejects namespace exceeding max length", () => {
+    expect(() => validateNamespace("x".repeat(257))).toThrow("must not exceed");
+  });
+
+  test("accepts namespace at max length", () => {
+    expect(() => validateNamespace("x".repeat(256))).not.toThrow();
+  });
 });

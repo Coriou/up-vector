@@ -10,8 +10,13 @@ import { decodeVectorBase64 } from "../translate/vectors";
 import type { Vector } from "../types";
 
 const RangeBody = z.object({
-  cursor: z.union([z.string(), z.number()]).transform(String),
-  limit: z.number().int().positive(),
+  cursor: z
+    .union([z.string(), z.number()])
+    .transform(String)
+    .refine((s) => s === "" || s === "0" || /^[1-9]\d*$/.test(s), {
+      message: "Cursor must be a non-negative integer or empty string",
+    }),
+  limit: z.number().int().positive().max(1000),
   prefix: z.string().optional(),
   includeMetadata: z.boolean().default(false),
   includeVectors: z.boolean().default(false),

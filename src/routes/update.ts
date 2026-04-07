@@ -6,9 +6,13 @@ import { getDetectedDimension } from "../translate/index";
 import { validateId, validateNamespace, vectorKey } from "../translate/keys";
 import { encodeVector, encodeVectorBase64 } from "../translate/vectors";
 
+const finiteNumber = z.number().refine((n) => Number.isFinite(n), {
+  message: "Vector values must be finite numbers (no NaN or Infinity)",
+});
+
 const UpdateBody = z.object({
   id: z.union([z.string(), z.number()]).transform(String),
-  vector: z.array(z.number()).optional(),
+  vector: z.array(finiteNumber).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
   data: z.string().optional(),
   metadataUpdateMode: z.enum(["OVERWRITE", "PATCH"]).default("OVERWRITE"),

@@ -18,9 +18,15 @@ import type { QueryResult } from "../types";
 const OVER_FETCH_FACTOR = 3;
 const MAX_OVER_FETCH = 1000;
 
+const MAX_TOP_K = 1000;
+
+const finiteNumber = z.number().refine((n) => Number.isFinite(n), {
+  message: "Vector values must be finite numbers (no NaN or Infinity)",
+});
+
 const SingleQuery = z.object({
-  vector: z.array(z.number()),
-  topK: z.number().int().positive().default(10),
+  vector: z.array(finiteNumber),
+  topK: z.number().int().positive().max(MAX_TOP_K).default(10),
   includeMetadata: z.boolean().default(false),
   includeVectors: z.boolean().default(false),
   includeData: z.boolean().default(false),
