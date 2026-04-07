@@ -1,7 +1,7 @@
 import { type Context, Hono } from "hono"
 import { config } from "../config"
 import { getClient } from "../redis"
-import { getDetectedDimension, parseNumDocs } from "../translate/index"
+import { loadDimension, parseNumDocs } from "../translate/index"
 import { indexName, NS_REGISTRY } from "../translate/keys"
 
 export const infoRoutes = new Hono()
@@ -34,10 +34,19 @@ const handleInfo = async (c: Context) => {
 	for (const { ns, vectorCount } of infos) {
 		namespaces[ns] = { vectorCount, pendingVectorCount: 0 }
 		totalVectorCount += vectorCount
+	}
 
-		if (detectedDimension === 0) {
-			const dim = getDetectedDimension(ns)
-			if (dim !== undefined) detectedDimension = dim
+	// If we still don't know the dimension (cold cache after restart), query Redis
+	// for the first namespace that has any vectors. loadDimension() consults FT.INFO.
+	if (detectedDimension === 0) {
+		for (const { ns, vectorCount } of infos) {
+			if (vectorCount > 0) {
+				const dim = await loadDimension(ns)
+				if (dim !== undefined) {
+					detectedDimension = dim
+					break
+				}
+			}
 		}
 	}
 

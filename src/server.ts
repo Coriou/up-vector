@@ -21,6 +21,15 @@ const app = new Hono()
 // Global error handler
 app.onError(errorHandler)
 
+// Default security headers for every response. These are cheap defense-in-depth
+// and harmless for an API that only ever returns JSON / plain text.
+app.use(async (c, next) => {
+	await next()
+	c.header("X-Content-Type-Options", "nosniff")
+	c.header("Referrer-Policy", "no-referrer")
+	c.header("Cache-Control", "no-store")
+})
+
 // Logger on all routes
 app.use(loggerMiddleware)
 
@@ -36,11 +45,12 @@ if (config.metricsEnabled) {
 // Auth on all remaining routes
 app.use("/*", authMiddleware)
 
-// Body size limit (16 MB) — protect against memory exhaustion
+// Body size limit (configurable, default 32 MiB) — protect against memory
+// exhaustion while still allowing max-batch upserts (1000 × 1536-dim ≈ 23 MB).
 app.use(
 	"/*",
 	bodyLimit({
-		maxSize: 16 * 1024 * 1024,
+		maxSize: config.maxBodySize,
 		onError: (c) => {
 			return c.json({ error: "Request body too large", status: 413 }, 413)
 		},

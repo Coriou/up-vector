@@ -1,18 +1,22 @@
 import { type Context, Hono } from "hono"
 import { z } from "zod"
 import type { FilterNode } from "../filter"
-import { evaluate, parse, tokenize } from "../filter"
+import { compileFilter, evaluate } from "../filter"
 import { getClient } from "../redis"
 import { deleteKeysByPattern, validateNamespace, vectorKey, vectorPrefix } from "../translate/keys"
 
 const MAX_SCAN_ITERATIONS = 10_000
+const MAX_ID_LENGTH = 1024
+
+const idSchema = z
+	.union([z.string(), z.number()])
+	.transform(String)
+	.refine((s) => s.length > 0, "Vector ID must not be empty")
+	.refine((s) => s.length <= MAX_ID_LENGTH, `Vector ID must not exceed ${MAX_ID_LENGTH} characters`)
 
 const DeleteBody = z
 	.object({
-		ids: z
-			.array(z.union([z.string(), z.number()]).transform(String))
-			.max(1000)
-			.optional(),
+		ids: z.array(idSchema).max(1000, "Batch must not exceed 1000 ids").optional(),
 		prefix: z.string().optional(),
 		filter: z.string().optional(),
 	})
@@ -62,9 +66,8 @@ async function deleteByFilter(
 	pattern: string,
 	filter: string,
 ): Promise<number> {
-	// Parse filter once — avoid re-tokenizing/re-parsing per key
-	const tokens = tokenize(filter)
-	const ast: FilterNode = parse(tokens)
+	// Parse filter once (LRU-cached across requests)
+	const ast: FilterNode = compileFilter(filter)
 
 	let cursor = "0"
 	let totalDeleted = 0
@@ -72,7 +75,7 @@ async function deleteByFilter(
 
 	do {
 		if (++iterations > MAX_SCAN_ITERATIONS) break
-		const result = await redis.scan(Number(cursor), "MATCH", pattern, "COUNT", 100)
+		const result = await redis.scan(cursor, "MATCH", pattern, "COUNT", 100)
 		const [next, keys] = result as unknown as [string, string[]]
 
 		if (keys.length > 0) {
@@ -98,7 +101,7 @@ async function deleteByFilter(
 			}
 		}
 
-		cursor = String(next)
+		cursor = next
 	} while (cursor !== "0")
 
 	return totalDeleted

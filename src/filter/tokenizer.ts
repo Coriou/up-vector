@@ -1,19 +1,22 @@
 import type { Token, TokenType } from "./types"
 
-const KEYWORDS: Record<string, TokenType> = {
-	and: "AND",
-	or: "OR",
-	not: "NOT",
-	glob: "GLOB",
-	in: "IN",
-	contains: "CONTAINS",
-	has: "HAS",
-	field: "FIELD",
-	true: "TRUE",
-	false: "FALSE",
-}
+// Use a Map (not a plain object) so identifiers like `__proto__` or `constructor`
+// don't accidentally hit prototype methods and get mis-tokenized as keywords.
+const KEYWORDS = new Map<string, TokenType>([
+	["and", "AND"],
+	["or", "OR"],
+	["not", "NOT"],
+	["glob", "GLOB"],
+	["in", "IN"],
+	["contains", "CONTAINS"],
+	["has", "HAS"],
+	["field", "FIELD"],
+	["true", "TRUE"],
+	["false", "FALSE"],
+])
 
 const MAX_FILTER_LENGTH = 8192
+const MAX_BRACKET_LENGTH = 32
 
 export function tokenize(input: string): Token[] {
 	if (input.length > MAX_FILTER_LENGTH) {
@@ -94,15 +97,32 @@ export function tokenize(input: string): Token[] {
 					i++
 				} else if (c === "[") {
 					// Consume bracket expression: [0], [#-1], etc.
+					// Only digits, optional leading minus, and `#` are allowed inside brackets.
+					// Throw on unclosed brackets so we don't silently swallow the rest of the input.
+					const bracketStart = i
 					i++ // skip [
-					while (i < input.length && input[i] !== "]") i++
-					if (i < input.length) i++ // skip ]
+					let bracketBody = 0
+					while (i < input.length && input[i] !== "]") {
+						const bc = input[i]
+						const ok = (bc >= "0" && bc <= "9") || bc === "#" || bc === "-"
+						if (!ok) {
+							throw new Error(`Invalid character '${bc}' in array index at position ${i}`)
+						}
+						i++
+						if (++bracketBody > MAX_BRACKET_LENGTH) {
+							throw new Error(`Array index too long at position ${bracketStart}`)
+						}
+					}
+					if (i >= input.length) {
+						throw new Error(`Unclosed array index at position ${bracketStart}`)
+					}
+					i++ // skip ]
 				} else {
 					break
 				}
 			}
 			const word = input.slice(start, i)
-			const keyword = KEYWORDS[word.toLowerCase()]
+			const keyword = KEYWORDS.get(word.toLowerCase())
 			if (keyword) {
 				tokens.push({
 					type: keyword,

@@ -33,10 +33,14 @@ rangeRoutes.post("/range/:namespace?", async (c) => {
 	const basePrefix = vectorPrefix(ns)
 	const pattern = parsed.prefix ? `${basePrefix}${parsed.prefix}*` : `${basePrefix}*`
 
-	// Accumulate results across multiple SCANs until we have `limit` keys
-	// or the cursor wraps to "0" (scan complete).
-	// Redis SCAN COUNT is only a hint — a single call may return fewer.
-	let scanCursor = parsed.cursor === "" ? 0 : Number(parsed.cursor)
+	// Accumulate keys across SCAN iterations. SCAN COUNT is a hint, not a hard
+	// cap, so a single call may return more than `limit`. Crucially, we must
+	// process the *entire* batch from each SCAN call before checking `limit` —
+	// breaking mid-batch and returning the post-batch cursor would silently drop
+	// the unprocessed keys (the cursor points past them and they're never seen
+	// on the next page). Cursors are kept as strings to avoid precision loss
+	// above 2^53.
+	let scanCursor = parsed.cursor === "" ? "0" : parsed.cursor
 	const collectedKeys: string[] = []
 	const seenKeys = new Set<string>()
 	let lastRawCursor = "0"
@@ -46,17 +50,17 @@ rangeRoutes.post("/range/:namespace?", async (c) => {
 		if (++iterations > MAX_SCAN_ITERATIONS) break
 		const result = await redis.scan(scanCursor, "MATCH", pattern, "COUNT", parsed.limit)
 		const [rawCursor, keys] = result as unknown as [string, string[]]
-		lastRawCursor = String(rawCursor)
+		lastRawCursor = rawCursor
 
 		for (const key of keys) {
-			if (collectedKeys.length >= parsed.limit) break
 			// SCAN can return duplicate keys across iterations — deduplicate
 			if (seenKeys.has(key)) continue
 			seenKeys.add(key)
 			collectedKeys.push(key)
 		}
 
-		scanCursor = Number(lastRawCursor)
+		scanCursor = lastRawCursor
+		// Stop *after* processing the full batch — never mid-batch
 		if (collectedKeys.length >= parsed.limit) break
 	} while (lastRawCursor !== "0")
 

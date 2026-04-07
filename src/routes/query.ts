@@ -3,9 +3,9 @@ import { HTTPException } from "hono/http-exception"
 import { z } from "zod"
 import { config } from "../config"
 import type { FilterNode } from "../filter"
-import { evaluate, parse, tokenize } from "../filter"
+import { compileFilter, evaluate } from "../filter"
 import { getClient } from "../redis"
-import { getDetectedDimension } from "../translate/index"
+import { loadDimension } from "../translate/index"
 import { indexName, parseVectorKey, validateNamespace } from "../translate/keys"
 import { normalizeScore } from "../translate/scores"
 import { decodeVectorBase64, encodeVector } from "../translate/vectors"
@@ -15,13 +15,18 @@ const OVER_FETCH_FACTOR = 3
 const MAX_OVER_FETCH = 1000
 
 const MAX_TOP_K = 1000
+const MAX_VECTOR_DIM = 16384
+const MAX_BATCH_QUERIES = 100
 
 const finiteNumber = z.number().refine((n) => Number.isFinite(n), {
 	message: "Vector values must be finite numbers (no NaN or Infinity)",
 })
 
 const SingleQuery = z.object({
-	vector: z.array(finiteNumber),
+	vector: z
+		.array(finiteNumber)
+		.min(1, "Vector dimension must be at least 1")
+		.max(MAX_VECTOR_DIM, `Vector dimension must not exceed ${MAX_VECTOR_DIM}`),
 	topK: z.number().int().positive().max(MAX_TOP_K).default(10),
 	includeMetadata: z.boolean().default(false),
 	includeVectors: z.boolean().default(false),
@@ -29,7 +34,13 @@ const SingleQuery = z.object({
 	filter: z.string().optional(),
 })
 
-const QueryBody = z.union([SingleQuery, z.array(SingleQuery)])
+const QueryBody = z.union([
+	SingleQuery,
+	z
+		.array(SingleQuery)
+		.min(1, "Batch must contain at least one query")
+		.max(MAX_BATCH_QUERIES, `Batch must not exceed ${MAX_BATCH_QUERIES} queries`),
+])
 
 export const queryRoutes = new Hono()
 
@@ -58,19 +69,20 @@ async function executeQuery(ns: string, query: ParsedQuery): Promise<QueryResult
 	const redis = getClient()
 	const idx = indexName(ns)
 
-	// Validate dimension
-	const existingDim = getDetectedDimension(ns)
+	// Validate dimension. loadDimension() falls back to FT.INFO when not cached so
+	// we still catch dimension mismatches after a restart that left the cache cold.
+	const existingDim = await loadDimension(ns)
 	if (existingDim !== undefined && query.vector.length !== existingDim) {
 		throw new HTTPException(400, {
 			message: `Dimension mismatch: namespace expects ${existingDim}, got ${query.vector.length}`,
 		})
 	}
 
-	// Parse filter once for all candidates (avoid re-tokenizing per candidate)
+	// Parse filter once for all candidates. compileFilter() also LRU-caches across
+	// requests so identical filter strings reuse the same AST.
 	let filterAst: FilterNode | undefined
 	if (query.filter) {
-		const tokens = tokenize(query.filter)
-		filterAst = parse(tokens)
+		filterAst = compileFilter(query.filter)
 	}
 
 	// Calculate fetch count (over-fetch when filtering)
@@ -102,19 +114,18 @@ async function executeQuery(ns: string, query: ParsedQuery): Promise<QueryResult
 		searchResult = await redis.send("FT.SEARCH", args as string[])
 	} catch (err: unknown) {
 		const msg = err instanceof Error ? err.message : String(err)
-		// No index = no vectors to search
-		if (
-			msg.includes("Unknown index") ||
-			msg.includes("Unknown Index") ||
-			msg.includes("No such index")
-		) {
+		// No index = no vectors to search. RediSearch error wording has shifted
+		// across versions; match case-insensitively on the substrings we know about.
+		if (isMissingIndexError(msg)) {
 			return []
 		}
 		throw err
 	}
 
-	// Parse FT.SEARCH response (RESP3 format)
-	const candidates = parseFtSearchResponse(searchResult)
+	// Parse FT.SEARCH response. We only need to JSON.parse the metadata when the
+	// caller actually uses it (filter or includeMetadata) — skip the work otherwise.
+	const needsMetadata = filterAst !== undefined || query.includeMetadata
+	const candidates = parseFtSearchResponse(searchResult, needsMetadata)
 
 	// Apply filter + normalize scores + trim to topK
 	const results: QueryResult[] = []
@@ -153,6 +164,16 @@ async function executeQuery(ns: string, query: ParsedQuery): Promise<QueryResult
 	return results
 }
 
+function isMissingIndexError(msg: string): boolean {
+	const lower = msg.toLowerCase()
+	return (
+		lower.includes("unknown index") ||
+		lower.includes("no such index") ||
+		lower.includes("index does not exist") ||
+		lower.includes("index not found")
+	)
+}
+
 type Candidate = {
 	id: string
 	rawScore: number
@@ -162,7 +183,7 @@ type Candidate = {
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: FT.SEARCH response shape varies by RESP version
-function parseFtSearchResponse(response: any): Candidate[] {
+function parseFtSearchResponse(response: any, parseMetadata: boolean): Candidate[] {
 	// RESP3 object format (Bun.redis default)
 	if (response && typeof response === "object" && !Array.isArray(response) && response.results) {
 		return (response.results as Array<Record<string, unknown>>).map((result) => {
@@ -170,7 +191,7 @@ function parseFtSearchResponse(response: any): Candidate[] {
 			const redisKey = result.id as string
 			const parsed = parseVectorKey(redisKey)
 			let metadata: Record<string, unknown> | undefined
-			if (attrs?.metadata) {
+			if (parseMetadata && attrs?.metadata) {
 				try {
 					metadata = JSON.parse(attrs.metadata)
 				} catch {
@@ -199,7 +220,7 @@ function parseFtSearchResponse(response: any): Candidate[] {
 			}
 			const parsed = parseVectorKey(redisKey)
 			let metadata: Record<string, unknown> | undefined
-			if (attrs.metadata) {
+			if (parseMetadata && attrs.metadata) {
 				try {
 					metadata = JSON.parse(attrs.metadata)
 				} catch {

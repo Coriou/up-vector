@@ -1,4 +1,5 @@
 import { type Context, Hono } from "hono"
+import { log } from "../logger"
 import { getClient } from "../redis"
 import { dropIndex } from "../translate/index"
 import {
@@ -28,15 +29,22 @@ const handleReset = async (c: Context) => {
 			// FT._LIST may not be available in older Redis versions
 		}
 
-		// Drop registered namespace indexes
-		await Promise.all(namespaces.map((n) => dropIndex(n)))
-
-		// Drop any orphaned idx:* indexes not already dropped
+		// Drop everything we know about — registered namespaces plus any orphaned
+		// idx:* indexes — even if some drops fail. Use allSettled so one failure
+		// doesn't abort the rest of the cleanup.
 		const droppedSet = new Set(namespaces.map((n) => `idx:${n}`))
-		for (const idx of allIndexes) {
-			if (idx.startsWith("idx:") && !droppedSet.has(idx)) {
-				const orphanNs = idx.slice(4)
-				await dropIndex(orphanNs)
+		const orphanNamespaces = allIndexes
+			.filter((idx) => idx.startsWith("idx:") && !droppedSet.has(idx))
+			.map((idx) => idx.slice(4))
+		const dropTargets = [...namespaces, ...orphanNamespaces]
+		const dropResults = await Promise.allSettled(dropTargets.map((n) => dropIndex(n)))
+		for (let i = 0; i < dropResults.length; i++) {
+			const result = dropResults[i]
+			if (result.status === "rejected") {
+				log.warn("dropIndex failed during reset all", {
+					namespace: dropTargets[i],
+					error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+				})
 			}
 		}
 

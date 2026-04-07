@@ -13,6 +13,13 @@ const envSchema = z.object({
 	UPVECTOR_SHUTDOWN_TIMEOUT: z.coerce.number().int().nonnegative().default(30000),
 	UPVECTOR_REQUEST_TIMEOUT: z.coerce.number().int().nonnegative().default(30000),
 	UPVECTOR_METRICS: z.enum(["true", "false"]).default("false"),
+	// 32 MiB default — covers a max upsert batch (1000 vectors × 1536 dims as JSON
+	// is ~23 MB) with headroom for metadata.
+	UPVECTOR_MAX_BODY_SIZE: z.coerce
+		.number()
+		.int()
+		.positive()
+		.default(32 * 1024 * 1024),
 })
 
 const parsed = envSchema.parse(process.env)
@@ -29,4 +36,5 @@ export const config = {
 	shutdownTimeout: parsed.UPVECTOR_SHUTDOWN_TIMEOUT,
 	requestTimeout: parsed.UPVECTOR_REQUEST_TIMEOUT,
 	metricsEnabled: parsed.UPVECTOR_METRICS === "true",
+	maxBodySize: parsed.UPVECTOR_MAX_BODY_SIZE,
 }

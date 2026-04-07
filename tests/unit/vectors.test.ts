@@ -72,4 +72,24 @@ describe("encodeVectorBase64 / decodeVectorBase64", () => {
 			expect(rel).toBeLessThan(1e-6)
 		}
 	})
+
+	test("rejects buffer length not a multiple of 4", () => {
+		// 6 bytes is not a multiple of 4 — must throw, not silently truncate
+		const corrupt = Buffer.from([0x00, 0x00, 0x80, 0x3f, 0x00, 0x00]).toString("base64")
+		expect(() => decodeVectorBase64(corrupt)).toThrow("multiple of 4 bytes")
+	})
+
+	test("works regardless of buffer pool offset", () => {
+		// Buffer.from() returns views into Bun's pool with arbitrary byteOffset.
+		// Float32Array requires byteOffset % 4 === 0, so the decoder copies into
+		// a fresh aligned buffer. Without this, decoding would throw on some inputs.
+		for (let trial = 0; trial < 100; trial++) {
+			const input = Array.from({ length: 4 }, () => Math.random())
+			const b64 = encodeVectorBase64(input)
+			const decoded = decodeVectorBase64(b64)
+			for (let i = 0; i < input.length; i++) {
+				expect(decoded[i]).toBeCloseTo(input[i], 5)
+			}
+		}
+	})
 })

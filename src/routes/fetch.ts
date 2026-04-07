@@ -5,11 +5,16 @@ import { parseVectorKey, validateNamespace, vectorKey, vectorPrefix } from "../t
 import { decodeVectorBase64 } from "../translate/vectors"
 import type { Vector } from "../types"
 
+const MAX_ID_LENGTH = 1024
+
+const idSchema = z
+	.union([z.string(), z.number()])
+	.transform(String)
+	.refine((s) => s.length > 0, "Vector ID must not be empty")
+	.refine((s) => s.length <= MAX_ID_LENGTH, `Vector ID must not exceed ${MAX_ID_LENGTH} characters`)
+
 const FetchBody = z.object({
-	ids: z
-		.array(z.union([z.string(), z.number()]).transform(String))
-		.max(1000)
-		.optional(),
+	ids: z.array(idSchema).max(1000, "Batch must not exceed 1000 ids").optional(),
 	prefix: z.string().optional(),
 	includeMetadata: z.boolean().default(false),
 	includeVectors: z.boolean().default(false),
@@ -94,13 +99,13 @@ async function scanAll(
 	let iterations = 0
 	do {
 		if (++iterations > MAX_SCAN_ITERATIONS) break
-		const result = await redis.scan(Number(cursor), "MATCH", pattern, "COUNT", 100)
+		const result = await redis.scan(cursor, "MATCH", pattern, "COUNT", 100)
 		const [next, batch] = result as unknown as [string, string[]]
 		for (const key of batch) {
 			keys.add(key)
 			if (keys.size >= limit) break
 		}
-		cursor = String(next)
+		cursor = next
 		if (keys.size >= limit) break
 	} while (cursor !== "0")
 	return Array.from(keys)

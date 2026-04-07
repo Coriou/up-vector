@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
+	_clearFilterCache,
+	compileFilter,
 	evaluate,
 	evaluateFilter,
 	globToRegex,
@@ -625,5 +627,100 @@ describe("filter hardening", () => {
 		const filter = `${open}x = 1${close}`
 		const ast = parse(tokenize(filter))
 		expect(evaluate(ast, { x: 1 })).toBe(true)
+	})
+})
+
+describe("tokenizer hardening: prototype keys", () => {
+	test("__proto__ is treated as a normal IDENTIFIER", () => {
+		// Using a Map for KEYWORDS prevents prototype methods from being mis-tokenized
+		const tokens = tokenize("__proto__ = 1")
+		expect(tokens[0].type).toBe("IDENTIFIER")
+		expect(tokens[0].value).toBe("__proto__")
+	})
+
+	test("constructor is treated as a normal IDENTIFIER", () => {
+		const tokens = tokenize("constructor = 1")
+		expect(tokens[0].type).toBe("IDENTIFIER")
+		expect(tokens[0].value).toBe("constructor")
+	})
+
+	test("__proto__ filter never matches metadata", () => {
+		// resolveField rejects unsafe keys, so __proto__ is treated as missing
+		expect(evaluateFilter("__proto__ = 1", { color: "red" })).toBe(false)
+		expect(evaluateFilter("constructor != 'foo'", { color: "red" })).toBe(false)
+		expect(evaluateFilter("HAS FIELD __proto__", { color: "red" })).toBe(false)
+		expect(evaluateFilter("HAS FIELD constructor", { color: "red" })).toBe(false)
+	})
+
+	test("inherited properties (toString, valueOf) cannot be read", () => {
+		expect(evaluateFilter("HAS FIELD toString", { color: "red" })).toBe(false)
+		expect(evaluateFilter("HAS FIELD valueOf", { color: "red" })).toBe(false)
+		expect(evaluateFilter("HAS FIELD hasOwnProperty", { color: "red" })).toBe(false)
+	})
+
+	test("nested __proto__ paths cannot be read", () => {
+		const meta = { user: { name: "alice" } }
+		expect(evaluateFilter("user.__proto__ != 'x'", meta)).toBe(false)
+		expect(evaluateFilter("user.constructor != 'x'", meta)).toBe(false)
+	})
+})
+
+describe("tokenizer hardening: bracket expressions", () => {
+	test("unclosed bracket throws clear error", () => {
+		expect(() => tokenize("items[0")).toThrow("Unclosed array index")
+		expect(() => tokenize("items[abc = 1")).toThrow()
+	})
+
+	test("non-numeric bracket content throws", () => {
+		expect(() => tokenize("items[abc]")).toThrow("Invalid character")
+		expect(() => tokenize("items[__proto__]")).toThrow("Invalid character")
+	})
+
+	test("bracket length is bounded", () => {
+		const longIndex = `items[${"1".repeat(50)}]`
+		expect(() => tokenize(longIndex)).toThrow("Array index too long")
+	})
+
+	test("valid bracket expressions still work", () => {
+		expect(tokenize("items[0]")[0].value).toBe("items[0]")
+		expect(tokenize("items[42]")[0].value).toBe("items[42]")
+		expect(tokenize("items[#-1]")[0].value).toBe("items[#-1]")
+	})
+})
+
+describe("compileFilter cache", () => {
+	test("returns the same AST for the same filter string", () => {
+		_clearFilterCache()
+		const ast1 = compileFilter("color = 'red'")
+		const ast2 = compileFilter("color = 'red'")
+		expect(ast1).toBe(ast2)
+	})
+
+	test("returns different ASTs for different filter strings", () => {
+		_clearFilterCache()
+		const ast1 = compileFilter("color = 'red'")
+		const ast2 = compileFilter("color = 'blue'")
+		expect(ast1).not.toBe(ast2)
+	})
+
+	test("evicts oldest when cache is full", () => {
+		_clearFilterCache()
+		// Fill the cache (default 256 entries)
+		for (let i = 0; i < 256; i++) {
+			compileFilter(`x = ${i}`)
+		}
+		const first = compileFilter("x = 0")
+		// Inserting one more should evict "x = 1" (the next oldest after 0 was just touched)
+		compileFilter("x = 999")
+		// "x = 0" was just touched and should still be cached
+		const firstAgain = compileFilter("x = 0")
+		expect(firstAgain).toBe(first)
+	})
+
+	test("propagates parser errors through cache", () => {
+		_clearFilterCache()
+		expect(() => compileFilter("x =")).toThrow()
+		// Errors should not be cached — a fresh attempt still throws
+		expect(() => compileFilter("x =")).toThrow()
 	})
 })

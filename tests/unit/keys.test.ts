@@ -119,3 +119,34 @@ describe("validateNamespace length", () => {
 		expect(() => validateNamespace("x".repeat(256))).not.toThrow()
 	})
 })
+
+describe("validateNamespace hardening", () => {
+	test("rejects glob metacharacters that would break SCAN MATCH", () => {
+		expect(() => validateNamespace("foo*")).toThrow("glob characters")
+		expect(() => validateNamespace("foo?")).toThrow("glob characters")
+		expect(() => validateNamespace("foo[bar]")).toThrow("glob characters")
+		expect(() => validateNamespace("foo\\bar")).toThrow("glob characters")
+	})
+
+	test("rejects control characters", () => {
+		expect(() => validateNamespace("foo\nbar")).toThrow("control characters")
+		expect(() => validateNamespace("foo\x00bar")).toThrow("control characters")
+		expect(() => validateNamespace("foo\x7fbar")).toThrow("control characters")
+	})
+
+	test("accepts unicode and high-ASCII", () => {
+		expect(() => validateNamespace("ünüversél")).not.toThrow()
+		expect(() => validateNamespace("中文")).not.toThrow()
+	})
+})
+
+describe("validateId hardening", () => {
+	test("rejects control characters", () => {
+		expect(() => validateId("foo\nbar")).toThrow("control characters")
+		expect(() => validateId("foo\x00bar")).toThrow("control characters")
+	})
+
+	test("accepts colons in IDs (the v:{ns}:{id} scheme tolerates them)", () => {
+		expect(() => validateId("user:42:profile")).not.toThrow()
+	})
+})

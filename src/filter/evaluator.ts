@@ -32,6 +32,12 @@ export function evaluate(node: FilterNode, metadata: Record<string, unknown>): b
 	}
 }
 
+// Reject these segment names so a malicious filter can't read prototype methods
+// (constructor, toString, valueOf, ...) via metadata field paths.
+function isUnsafeKey(key: string): boolean {
+	return key === "__proto__" || key === "constructor" || key === "prototype"
+}
+
 export function resolveField(obj: Record<string, unknown>, path: string): unknown {
 	// Split on dots, but respect bracket notation
 	const segments = splitFieldPath(path)
@@ -45,22 +51,31 @@ export function resolveField(obj: Record<string, unknown>, path: string): unknow
 		const bracketMatch = seg.match(/^([^[]+)\[(.+)\]$/)
 		if (bracketMatch) {
 			const [, key, indexExpr] = bracketMatch
-			current = (current as Record<string, unknown>)[key]
-			if (!Array.isArray(current)) return undefined
+			if (isUnsafeKey(key)) return undefined
+			// Use Object.hasOwn to avoid inherited properties
+			const arr =
+				typeof current === "object" && current !== null && Object.hasOwn(current, key)
+					? (current as Record<string, unknown>)[key]
+					: undefined
+			if (!Array.isArray(arr)) return undefined
 
 			let idx: number
 			if (indexExpr.startsWith("#")) {
 				// Backward indexing: #-1 = last, #-2 = second to last
 				const offset = Number(indexExpr.slice(1))
-				idx = current.length + offset
+				idx = arr.length + offset
 			} else {
 				idx = Number(indexExpr)
 			}
 
-			if (idx < 0 || idx >= current.length) return undefined
-			current = current[idx]
+			if (!Number.isInteger(idx) || idx < 0 || idx >= arr.length) return undefined
+			current = arr[idx]
 		} else {
-			current = (current as Record<string, unknown>)[seg]
+			if (isUnsafeKey(seg)) return undefined
+			current =
+				typeof current === "object" && current !== null && Object.hasOwn(current, seg)
+					? (current as Record<string, unknown>)[seg]
+					: undefined
 		}
 	}
 
