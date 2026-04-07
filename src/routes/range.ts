@@ -1,58 +1,90 @@
-import { Hono } from "hono"
-import { z } from "zod"
-import { getClient } from "../redis"
-import { parseVectorKey, vectorPrefix } from "../translate/keys"
-import { decodeVectorBase64 } from "../translate/vectors"
-import type { Vector } from "../types"
+import { Hono } from "hono";
+import { z } from "zod";
+import { getClient } from "../redis";
+import { parseVectorKey, vectorPrefix } from "../translate/keys";
+import { decodeVectorBase64 } from "../translate/vectors";
+import type { Vector } from "../types";
 
 const RangeBody = z.object({
-	cursor: z.union([z.string(), z.number()]).transform(String),
-	limit: z.number().int().positive(),
-	prefix: z.string().optional(),
-	includeMetadata: z.boolean().default(false),
-	includeVectors: z.boolean().default(false),
-	includeData: z.boolean().default(false),
-})
+  cursor: z.union([z.string(), z.number()]).transform(String),
+  limit: z.number().int().positive(),
+  prefix: z.string().optional(),
+  includeMetadata: z.boolean().default(false),
+  includeVectors: z.boolean().default(false),
+  includeData: z.boolean().default(false),
+});
 
-export const rangeRoutes = new Hono()
+export const rangeRoutes = new Hono();
 
 rangeRoutes.post("/range/:namespace?", async (c) => {
-	const body = await c.req.json()
-	const parsed = RangeBody.parse(body)
-	const ns = c.req.param("namespace") ?? ""
-	const redis = getClient()
+  const body = await c.req.json();
+  const parsed = RangeBody.parse(body);
+  const ns = c.req.param("namespace") ?? "";
+  const redis = getClient();
 
-	const basePrefix = vectorPrefix(ns)
-	const pattern = parsed.prefix ? `${basePrefix}${parsed.prefix}*` : `${basePrefix}*`
+  const basePrefix = vectorPrefix(ns);
+  const pattern = parsed.prefix
+    ? `${basePrefix}${parsed.prefix}*`
+    : `${basePrefix}*`;
 
-	// SCAN with the given cursor, COUNT = limit as a hint
-	const scanCursor = parsed.cursor === "" ? 0 : Number(parsed.cursor)
-	const result = await redis.scan(scanCursor, "MATCH", pattern, "COUNT", parsed.limit)
-	const [rawCursor, keys] = result as unknown as [string, string[]]
+  // Accumulate results across multiple SCANs until we have `limit` keys
+  // or the cursor wraps to "0" (scan complete).
+  // Redis SCAN COUNT is only a hint — a single call may return fewer.
+  let scanCursor = parsed.cursor === "" ? 0 : Number(parsed.cursor);
+  const collectedKeys: string[] = [];
+  const seenKeys = new Set<string>();
+  let lastRawCursor = "0";
 
-	// Fetch details for each matched key
-	const vectors: Vector[] = await Promise.all(
-		keys.map(async (key) => {
-			const hash = await redis.hgetall(key)
-			const parsedKey = parseVectorKey(key)
-			const id = parsedKey?.id ?? hash?.id ?? key
+  do {
+    const result = await redis.scan(
+      scanCursor,
+      "MATCH",
+      pattern,
+      "COUNT",
+      parsed.limit,
+    );
+    const [rawCursor, keys] = result as unknown as [string, string[]];
+    lastRawCursor = String(rawCursor);
 
-			const vec: Vector = { id }
-			if (parsed.includeVectors && hash?._vec) {
-				vec.vector = decodeVectorBase64(hash._vec)
-			}
-			if (parsed.includeMetadata && hash?.metadata) {
-				vec.metadata = JSON.parse(hash.metadata)
-			}
-			if (parsed.includeData && hash?.data) {
-				vec.data = hash.data
-			}
-			return vec
-		}),
-	)
+    for (const key of keys) {
+      if (collectedKeys.length >= parsed.limit) break;
+      // SCAN can return duplicate keys across iterations — deduplicate
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      collectedKeys.push(key);
+    }
 
-	// Map Redis done-cursor ("0") to Upstash done-signal ("")
-	const nextCursor = String(rawCursor) === "0" ? "" : String(rawCursor)
+    scanCursor = Number(lastRawCursor);
+    if (collectedKeys.length >= parsed.limit) break;
+  } while (lastRawCursor !== "0");
 
-	return c.json({ result: { nextCursor, vectors } })
-})
+  // Fetch details for each matched key
+  const vectors: Vector[] = await Promise.all(
+    collectedKeys.map(async (key) => {
+      const hash = await redis.hgetall(key);
+      const parsedKey = parseVectorKey(key);
+      const id = parsedKey?.id ?? hash?.id ?? key;
+
+      const vec: Vector = { id };
+      if (parsed.includeVectors && hash?._vec) {
+        vec.vector = decodeVectorBase64(hash._vec);
+      }
+      if (parsed.includeMetadata && hash?.metadata) {
+        try {
+          vec.metadata = JSON.parse(hash.metadata);
+        } catch {
+          // Malformed metadata JSON — skip
+        }
+      }
+      if (parsed.includeData && hash?.data !== undefined) {
+        vec.data = hash.data;
+      }
+      return vec;
+    }),
+  );
+
+  // Map Redis done-cursor ("0") to Upstash done-signal ("")
+  const nextCursor = lastRawCursor === "0" ? "" : lastRawCursor;
+
+  return c.json({ result: { nextCursor, vectors } });
+});
