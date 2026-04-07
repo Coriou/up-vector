@@ -1,6 +1,21 @@
 import { getClient } from "../redis";
 
 export const NS_REGISTRY = "_ns_registry";
+const MAX_SCAN_ITERATIONS = 10_000;
+
+/** Validates that a namespace name won't corrupt the key scheme */
+export function validateNamespace(ns: string): void {
+  if (ns.includes(":")) {
+    throw new Error("Namespace name must not contain ':'");
+  }
+}
+
+/** Validates that an ID is non-empty */
+export function validateId(id: string): void {
+  if (id === "") {
+    throw new Error("Vector ID must not be empty");
+  }
+}
 
 export function vectorKey(ns: string, id: string): string {
   return `v:${ns}:${id}`;
@@ -31,7 +46,9 @@ export async function deleteKeysByPattern(pattern: string): Promise<number> {
   let cursor = "0";
   let totalDeleted = 0;
   const seen = new Set<string>();
+  let iterations = 0;
   do {
+    if (++iterations > MAX_SCAN_ITERATIONS) break;
     const result = await redis.scan(
       Number(cursor),
       "MATCH",

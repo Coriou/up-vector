@@ -3,6 +3,13 @@ import { HTTPException } from "hono/http-exception";
 import { ZodError } from "zod";
 import { log } from "../logger";
 
+// Validation error messages that should return 400 instead of 500
+const VALIDATION_PATTERNS = ["must not contain", "must not be empty"];
+
+function isValidationError(err: Error): boolean {
+  return VALIDATION_PATTERNS.some((p) => err.message.includes(p));
+}
+
 export const errorHandler: ErrorHandler = (err, c) => {
   if (err instanceof HTTPException) {
     const message = err.message || "Unauthorized";
@@ -12,6 +19,11 @@ export const errorHandler: ErrorHandler = (err, c) => {
   if (err instanceof ZodError) {
     const message = err.issues.map((i) => i.message).join(", ");
     return c.json({ error: message, status: 400 }, 400);
+  }
+
+  // Input validation errors (from validateNamespace, validateId, etc.)
+  if (err instanceof Error && isValidationError(err)) {
+    return c.json({ error: err.message, status: 400 }, 400);
   }
 
   log.error("unhandled error", {

@@ -4,6 +4,7 @@ import { dropIndex } from "../translate/index";
 import {
   deleteKeysByPattern,
   NS_REGISTRY,
+  validateNamespace,
   vectorPrefix,
 } from "../translate/keys";
 
@@ -11,6 +12,7 @@ export const resetRoutes = new Hono();
 
 const handleReset = async (c: Context) => {
   const ns = c.req.param("namespace") ?? "";
+  validateNamespace(ns);
   const all = c.req.query("all") !== undefined;
   const redis = getClient();
 

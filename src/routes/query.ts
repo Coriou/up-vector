@@ -6,7 +6,11 @@ import type { FilterNode } from "../filter";
 import { evaluate, parse, tokenize } from "../filter";
 import { getClient } from "../redis";
 import { getDetectedDimension } from "../translate/index";
-import { indexName, parseVectorKey } from "../translate/keys";
+import {
+  indexName,
+  parseVectorKey,
+  validateNamespace,
+} from "../translate/keys";
 import { normalizeScore } from "../translate/scores";
 import { decodeVectorBase64, encodeVector } from "../translate/vectors";
 import type { QueryResult } from "../types";
@@ -31,6 +35,7 @@ queryRoutes.post("/query/:namespace?", async (c) => {
   const body = await c.req.json();
   const parsed = QueryBody.parse(body);
   const ns = c.req.param("namespace") ?? "";
+  validateNamespace(ns);
 
   const isBatch = Array.isArray(parsed);
   const queries = isBatch ? parsed : [parsed];
@@ -128,7 +133,9 @@ async function executeQuery(
 
     const result: QueryResult = {
       id: candidate.id,
-      score: normalizeScore(candidate.rawScore, config.metric),
+      score: Number.isFinite(candidate.rawScore)
+        ? normalizeScore(candidate.rawScore, config.metric)
+        : 0,
     };
     if (query.includeMetadata && candidate.metadata) {
       result.metadata = candidate.metadata;

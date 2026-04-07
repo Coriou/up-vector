@@ -594,3 +594,85 @@ describe("evaluateFilter", () => {
     expect(evaluateFilter("x = 1", {})).toBe(false);
   });
 });
+
+// ─── Hardening: edge cases ──────────────────────────────────────────────────
+
+describe("globToRegex hardening", () => {
+  test("consecutive wildcards are collapsed", () => {
+    const re = globToRegex("a***b");
+    expect(re.test("axyzb")).toBe(true);
+    expect(re.test("ab")).toBe(true);
+    expect(re.test("axb")).toBe(true);
+  });
+
+  test("unclosed bracket treated as literal", () => {
+    const re = globToRegex("[abc");
+    expect(re.test("[abc")).toBe(true);
+    expect(re.test("a")).toBe(false);
+  });
+
+  test("empty pattern matches empty string", () => {
+    const re = globToRegex("");
+    expect(re.test("")).toBe(true);
+    expect(re.test("a")).toBe(false);
+  });
+});
+
+describe("tokenizer error handling", () => {
+  test("unterminated string throws", () => {
+    expect(() => tokenize("name = 'unclosed")).toThrow("Unterminated string");
+  });
+
+  test("unexpected character throws", () => {
+    expect(() => tokenize("name = @bad")).toThrow("Unexpected character");
+  });
+});
+
+describe("parser error handling", () => {
+  test("missing value after operator throws", () => {
+    expect(() => parse(tokenize("x ="))).toThrow();
+  });
+
+  test("unclosed parenthesis throws", () => {
+    expect(() => parse(tokenize("(x = 1"))).toThrow();
+  });
+
+  test("extra tokens after expression throws", () => {
+    expect(() => parse(tokenize("x = 1 y = 2"))).toThrow();
+  });
+});
+
+describe("evaluator edge cases", () => {
+  test("null metadata values treated as missing", () => {
+    expect(evaluate(parse(tokenize("x = 1")), { x: null })).toBe(false);
+  });
+
+  test("IN with empty list after parse", () => {
+    // Manual AST — parser requires at least one value in IN list
+    const ast = { type: "in" as const, field: "x", values: [], negated: false };
+    expect(evaluate(ast, { x: 1 })).toBe(false);
+  });
+
+  test("CONTAINS on non-existent field", () => {
+    expect(evaluateFilter("missing CONTAINS 'val'", { other: "x" })).toBe(
+      false,
+    );
+  });
+
+  test("GLOB on non-string field returns false", () => {
+    expect(evaluateFilter("count GLOB '*'", { count: 42 })).toBe(false);
+  });
+
+  test("HAS FIELD with array index path", () => {
+    expect(evaluateFilter("HAS FIELD items", { items: [1, 2] })).toBe(true);
+    expect(evaluateFilter("HAS NOT FIELD items", { items: [1, 2] })).toBe(
+      false,
+    );
+  });
+
+  test("comparison with boolean coercion", () => {
+    expect(evaluateFilter("active = true", { active: true })).toBe(true);
+    expect(evaluateFilter("active = true", { active: 1 })).toBe(true);
+    expect(evaluateFilter("active = false", { active: false })).toBe(true);
+  });
+});

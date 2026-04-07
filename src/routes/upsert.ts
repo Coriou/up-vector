@@ -7,7 +7,12 @@ import {
   getDetectedDimension,
   setDetectedDimension,
 } from "../translate/index";
-import { NS_REGISTRY, vectorKey } from "../translate/keys";
+import {
+  NS_REGISTRY,
+  validateId,
+  validateNamespace,
+  vectorKey,
+} from "../translate/keys";
 import { encodeVector, encodeVectorBase64 } from "../translate/vectors";
 
 const VectorSchema = z.object({
@@ -31,6 +36,7 @@ upsertRoutes.post("/upsert/:namespace?", async (c) => {
   }
 
   const ns = c.req.param("namespace") ?? "";
+  validateNamespace(ns);
   const redis = getClient();
 
   // Validate dimension consistency within the batch
@@ -41,6 +47,7 @@ upsertRoutes.post("/upsert/:namespace?", async (c) => {
     });
   }
   for (const v of vectors) {
+    validateId(v.id);
     if (v.vector.length !== dim) {
       throw new HTTPException(400, {
         message: `Dimension mismatch in batch: expected ${dim}, got ${v.vector.length}`,

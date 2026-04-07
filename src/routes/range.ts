@@ -1,7 +1,11 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { getClient } from "../redis";
-import { parseVectorKey, vectorPrefix } from "../translate/keys";
+import {
+  parseVectorKey,
+  validateNamespace,
+  vectorPrefix,
+} from "../translate/keys";
 import { decodeVectorBase64 } from "../translate/vectors";
 import type { Vector } from "../types";
 
@@ -14,12 +18,15 @@ const RangeBody = z.object({
   includeData: z.boolean().default(false),
 });
 
+const MAX_SCAN_ITERATIONS = 10_000;
+
 export const rangeRoutes = new Hono();
 
 rangeRoutes.post("/range/:namespace?", async (c) => {
   const body = await c.req.json();
   const parsed = RangeBody.parse(body);
   const ns = c.req.param("namespace") ?? "";
+  validateNamespace(ns);
   const redis = getClient();
 
   const basePrefix = vectorPrefix(ns);
@@ -34,8 +41,10 @@ rangeRoutes.post("/range/:namespace?", async (c) => {
   const collectedKeys: string[] = [];
   const seenKeys = new Set<string>();
   let lastRawCursor = "0";
+  let iterations = 0;
 
   do {
+    if (++iterations > MAX_SCAN_ITERATIONS) break;
     const result = await redis.scan(
       scanCursor,
       "MATCH",

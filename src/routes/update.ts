@@ -3,7 +3,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { getClient } from "../redis";
 import { getDetectedDimension } from "../translate/index";
-import { vectorKey } from "../translate/keys";
+import { validateId, validateNamespace, vectorKey } from "../translate/keys";
 import { encodeVector, encodeVectorBase64 } from "../translate/vectors";
 
 const UpdateBody = z.object({
@@ -20,6 +20,8 @@ updateRoutes.post("/update/:namespace?", async (c) => {
   const body = await c.req.json();
   const parsed = UpdateBody.parse(body);
   const ns = c.req.param("namespace") ?? "";
+  validateNamespace(ns);
+  validateId(parsed.id);
   const redis = getClient();
   const key = vectorKey(ns, parsed.id);
 

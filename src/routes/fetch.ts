@@ -1,7 +1,12 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { getClient } from "../redis";
-import { parseVectorKey, vectorKey, vectorPrefix } from "../translate/keys";
+import {
+  parseVectorKey,
+  validateNamespace,
+  vectorKey,
+  vectorPrefix,
+} from "../translate/keys";
 import { decodeVectorBase64 } from "../translate/vectors";
 import type { Vector } from "../types";
 
@@ -19,6 +24,7 @@ fetchRoutes.post("/fetch/:namespace?", async (c) => {
   const body = await c.req.json();
   const parsed = FetchBody.parse(body);
   const ns = c.req.param("namespace") ?? "";
+  validateNamespace(ns);
   const redis = getClient();
 
   // Fetch by IDs (default path, also used when both ids and prefix are given)
@@ -33,10 +39,10 @@ fetchRoutes.post("/fetch/:namespace?", async (c) => {
     return c.json({ result: results });
   }
 
-  // Fetch by prefix
+  // Fetch by prefix — Upstash caps at 1000 results for prefix fetch
   if (parsed.prefix) {
     const pattern = `${vectorPrefix(ns)}${parsed.prefix}*`;
-    const keys = await scanAll(redis, pattern);
+    const keys = await scanAll(redis, pattern, 1000);
     const results = await Promise.all(
       keys.map(async (key) => {
         const hash = await redis.hgetall(key);
@@ -78,13 +84,18 @@ function buildVector(
   return vec;
 }
 
+const MAX_SCAN_ITERATIONS = 10_000;
+
 async function scanAll(
   redis: ReturnType<typeof getClient>,
   pattern: string,
+  limit = Number.POSITIVE_INFINITY,
 ): Promise<string[]> {
   const keys = new Set<string>();
   let cursor = "0";
+  let iterations = 0;
   do {
+    if (++iterations > MAX_SCAN_ITERATIONS) break;
     const result = await redis.scan(
       Number(cursor),
       "MATCH",
@@ -93,8 +104,12 @@ async function scanAll(
       100,
     );
     const [next, batch] = result as unknown as [string, string[]];
-    for (const key of batch) keys.add(key);
+    for (const key of batch) {
+      keys.add(key);
+      if (keys.size >= limit) break;
+    }
     cursor = String(next);
+    if (keys.size >= limit) break;
   } while (cursor !== "0");
   return Array.from(keys);
 }

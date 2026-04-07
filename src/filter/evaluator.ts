@@ -173,18 +173,26 @@ export function globToRegex(pattern: string): RegExp {
   while (i < pattern.length) {
     const ch = pattern[i];
     if (ch === "*") {
+      // Collapse consecutive wildcards to prevent catastrophic backtracking
+      while (i + 1 < pattern.length && pattern[i + 1] === "*") i++;
       regex += ".*";
     } else if (ch === "?") {
       regex += ".";
     } else if (ch === "[") {
-      // Pass through character classes
-      regex += "[";
-      i++;
+      // Pass through character classes — ensure bracket is closed
+      i++; // skip [
+      let classContent = "";
       while (i < pattern.length && pattern[i] !== "]") {
-        regex += pattern[i];
+        classContent += pattern[i];
         i++;
       }
-      regex += "]";
+      if (i >= pattern.length) {
+        // Unclosed bracket — treat the opening [ as a literal
+        regex += "\\[";
+        regex += classContent.replace(/[.*+?^${}()|\\[\]]/g, "\\$&");
+        continue; // i is already at end, loop will terminate
+      }
+      regex += `[${classContent}]`;
       // biome-ignore lint/suspicious/noTemplateCurlyInString: literal regex metacharacters, not template
     } else if (".+^${}()|\\".includes(ch)) {
       regex += `\\${ch}`;

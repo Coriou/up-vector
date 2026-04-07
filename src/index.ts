@@ -5,9 +5,21 @@ import { app } from "./server";
 import { setShuttingDown } from "./shutdown";
 import { syncIndexes } from "./translate/index";
 
+/** Redact credentials from a Redis URL for safe logging */
+function redactUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    if (u.password) u.password = "***";
+    if (u.username && u.username !== "default") u.username = "***";
+    return u.toString();
+  } catch {
+    return "***";
+  }
+}
+
 async function main(): Promise<void> {
   await initRedis();
-  log.info("connected to redis", { url: config.redisUrl });
+  log.info("connected to redis", { url: redactUrl(config.redisUrl) });
 
   await syncIndexes();
   log.info("index sync complete");
