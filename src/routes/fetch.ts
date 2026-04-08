@@ -1,7 +1,13 @@
 import { Hono } from "hono"
 import { z } from "zod"
 import { getClient } from "../redis"
-import { parseVectorKey, validateNamespace, vectorKey, vectorPrefix } from "../translate/keys"
+import {
+	parseVectorKey,
+	validateNamespace,
+	validatePrefix,
+	vectorKey,
+	vectorPrefix,
+} from "../translate/keys"
 import { decodeVectorBase64 } from "../translate/vectors"
 import type { Vector } from "../types"
 
@@ -44,6 +50,7 @@ fetchRoutes.post("/fetch/:namespace?", async (c) => {
 
 	// Fetch by prefix — Upstash caps at 1000 results for prefix fetch
 	if (parsed.prefix) {
+		validatePrefix(parsed.prefix)
 		const pattern = `${vectorPrefix(ns)}${parsed.prefix}*`
 		const keys = await scanAll(redis, pattern, 1000)
 		const results = await Promise.all(

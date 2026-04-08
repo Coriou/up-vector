@@ -1,8 +1,20 @@
 import { z } from "zod"
 import type { DistanceMetric } from "./types"
 
+// Hono's bearerAuth (RFC 6750) only accepts tokens matching this charset on the
+// wire. If UPVECTOR_TOKEN contains a character outside this set, every
+// authenticated request would be rejected as 400 Bad Request before the
+// timing-safe comparison ever runs — silently un-authable. Validate at boot.
+const BEARER_TOKEN_CHARSET = /^[A-Za-z0-9._~+/-]+=*$/
+
 const envSchema = z.object({
-	UPVECTOR_TOKEN: z.string().min(1, "UPVECTOR_TOKEN is required"),
+	UPVECTOR_TOKEN: z
+		.string()
+		.min(1, "UPVECTOR_TOKEN is required")
+		.refine(
+			(t) => BEARER_TOKEN_CHARSET.test(t),
+			"UPVECTOR_TOKEN must only contain RFC 6750 bearer token characters: [A-Za-z0-9._~+/-]+=*",
+		),
 	UPVECTOR_REDIS_URL: z.string().default("redis://localhost:6379"),
 	UPVECTOR_PORT: z.coerce.number().int().positive().default(8080),
 	UPVECTOR_HOST: z.string().default("0.0.0.0"),

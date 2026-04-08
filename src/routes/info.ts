@@ -54,6 +54,11 @@ const handleInfo = async (c: Context) => {
 		result: {
 			vectorCount: totalVectorCount,
 			pendingVectorCount: 0,
+			// Upstash exposes a byte-size estimate; RediSearch reports something
+			// different per version, and the SDK only uses this for diagnostics.
+			// Returning 0 keeps the field present (it's required in the SDK type)
+			// while being explicit that we don't track it.
+			indexSize: 0,
 			dimension: detectedDimension,
 			similarityFunction: config.metric,
 			namespaces,

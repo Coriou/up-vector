@@ -152,4 +152,27 @@ describe("filtered queries", () => {
 		})
 		expect((data as { result: unknown[] }).result).toEqual([])
 	})
+
+	test("HAS NOT FIELD matches a vector with no metadata at all", async () => {
+		// Regression: query.ts used to skip candidates with missing metadata
+		// before consulting the filter. `HAS NOT FIELD x` must *match* a
+		// vector that has no metadata.
+		await api("POST", "/upsert/has-not-ns", [
+			{ id: "with-meta", vector: [1, 0, 0], metadata: { color: "red" } },
+			{ id: "no-meta", vector: [0.9, 0.1, 0] },
+		])
+		await new Promise((r) => setTimeout(r, 500))
+
+		const { data } = await api("POST", "/query/has-not-ns", {
+			vector: [1, 0, 0],
+			topK: 10,
+			filter: "HAS NOT FIELD color",
+			includeMetadata: true,
+		})
+		const ids = (data as { result: Array<{ id: string }> }).result.map((r) => r.id).sort()
+		expect(ids).toContain("no-meta")
+		expect(ids).not.toContain("with-meta")
+
+		await api("POST", "/reset/has-not-ns")
+	})
 })

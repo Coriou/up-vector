@@ -1,6 +1,6 @@
 import { Hono } from "hono"
-import { HTTPException } from "hono/http-exception"
 import { z } from "zod"
+import { ValidationError } from "../errors"
 import { getClient } from "../redis"
 import { ensureIndex, loadDimension, setDetectedDimension } from "../translate/index"
 import { NS_REGISTRY, validateId, validateNamespace, vectorKey } from "../translate/keys"
@@ -48,9 +48,9 @@ upsertRoutes.post("/upsert/:namespace?", async (c) => {
 	for (const v of vectors) {
 		validateId(v.id)
 		if (v.vector.length !== dim) {
-			throw new HTTPException(400, {
-				message: `Dimension mismatch in batch: expected ${dim}, got ${v.vector.length}`,
-			})
+			throw new ValidationError(
+				`Dimension mismatch in batch: expected ${dim}, got ${v.vector.length}`,
+			)
 		}
 	}
 
@@ -59,23 +59,15 @@ upsertRoutes.post("/upsert/:namespace?", async (c) => {
 	// after a server restart that didn't fully sync indexes.
 	const existingDim = await loadDimension(ns)
 	if (existingDim !== undefined && existingDim !== dim) {
-		throw new HTTPException(400, {
-			message: `Dimension mismatch: namespace expects ${existingDim}, got ${dim}`,
-		})
+		throw new ValidationError(`Dimension mismatch: namespace expects ${existingDim}, got ${dim}`)
 	}
 
 	// Ensure the RediSearch index exists. ensureIndex() also validates dimension
 	// against what Redis reports, defending against the race where two requests
 	// with different dimensions hit a freshly-restarted server simultaneously.
-	try {
-		await ensureIndex(ns, dim)
-	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err)
-		if (msg.startsWith("Dimension mismatch")) {
-			throw new HTTPException(400, { message: msg })
-		}
-		throw err
-	}
+	// ensureIndex() throws ValidationError on dim mismatch — propagate as-is so
+	// the global error handler maps it to 400.
+	await ensureIndex(ns, dim)
 	setDetectedDimension(ns, dim)
 
 	// Upsert all vectors (auto-pipelined via Promise.all). The namespace registry

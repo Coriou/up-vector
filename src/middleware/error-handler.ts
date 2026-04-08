@@ -1,35 +1,21 @@
+import { STATUS_CODES } from "node:http"
 import type { ErrorHandler } from "hono"
 import { HTTPException } from "hono/http-exception"
 import { ZodError } from "zod"
 import { config } from "../config"
+import { ValidationError } from "../errors"
 import { log } from "../logger"
 
-// Validation error messages from validateNamespace/validateId/filter parser that
-// should return 400 (bad input) instead of 500 (server fault).
-const VALIDATION_PATTERNS = [
-	"must not contain",
-	"must not be empty",
-	"must not exceed",
-	"too long",
-	"too deeply nested",
-	"Unterminated string",
-	"Unexpected character",
-	"Unexpected token",
-	"Expected value",
-	"Expected operator",
-	"Expected ",
-	"Invalid character",
-	"Unclosed array index",
-	"Array index too long",
-]
-
-function isValidationError(err: Error): boolean {
-	return VALIDATION_PATTERNS.some((p) => err.message.includes(p))
+function statusText(status: number): string {
+	return STATUS_CODES[status] ?? "Error"
 }
 
 export const errorHandler: ErrorHandler = (err, c) => {
 	if (err instanceof HTTPException) {
-		const message = err.message || "Unauthorized"
+		// HTTPException can be thrown without a message (e.g. by hono/bearer-auth),
+		// in which case `err.message` is empty. Fall back to the canonical HTTP
+		// status text so we don't return a misleading "Unauthorized" for a 400.
+		const message = err.message || statusText(err.status)
 		return c.json({ error: message, status: err.status }, err.status)
 	}
 
@@ -43,8 +29,10 @@ export const errorHandler: ErrorHandler = (err, c) => {
 		return c.json({ error: "Invalid JSON body", status: 400 }, 400)
 	}
 
-	// Input validation errors (from validateNamespace, validateId, filter parser, …)
-	if (err instanceof Error && isValidationError(err)) {
+	// Typed validation errors thrown by validators (keys, filter parser, …).
+	// Using a class instead of substring matching prevents misclassifying
+	// unrelated errors whose message happens to contain a validator phrase.
+	if (err instanceof ValidationError) {
 		return c.json({ error: err.message, status: 400 }, 400)
 	}
 

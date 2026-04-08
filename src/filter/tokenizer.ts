@@ -1,3 +1,4 @@
+import { ValidationError } from "../errors"
 import type { Token, TokenType } from "./types"
 
 // Use a Map (not a plain object) so identifiers like `__proto__` or `constructor`
@@ -20,7 +21,7 @@ const MAX_BRACKET_LENGTH = 32
 
 export function tokenize(input: string): Token[] {
 	if (input.length > MAX_FILTER_LENGTH) {
-		throw new Error(`Filter string too long (max ${MAX_FILTER_LENGTH} chars)`)
+		throw new ValidationError(`Filter string too long (max ${MAX_FILTER_LENGTH} chars)`)
 	}
 	const tokens: Token[] = []
 	let i = 0
@@ -50,7 +51,7 @@ export function tokenize(input: string): Token[] {
 				}
 			}
 			if (i >= input.length) {
-				throw new Error(`Unterminated string at position ${start}`)
+				throw new ValidationError(`Unterminated string at position ${start}`)
 			}
 			i++ // skip closing quote
 			tokens.push({ type: "STRING", value, pos: start })
@@ -63,7 +64,7 @@ export function tokenize(input: string): Token[] {
 			if (ch === "-") {
 				const next = input[i + 1]
 				if (!next || next < "0" || next > "9") {
-					throw new Error(`Unexpected character '-' at position ${i}`)
+					throw new ValidationError(`Unexpected character '-' at position ${i}`)
 				}
 			}
 			const start = i
@@ -106,15 +107,15 @@ export function tokenize(input: string): Token[] {
 						const bc = input[i]
 						const ok = (bc >= "0" && bc <= "9") || bc === "#" || bc === "-"
 						if (!ok) {
-							throw new Error(`Invalid character '${bc}' in array index at position ${i}`)
+							throw new ValidationError(`Invalid character '${bc}' in array index at position ${i}`)
 						}
 						i++
 						if (++bracketBody > MAX_BRACKET_LENGTH) {
-							throw new Error(`Array index too long at position ${bracketStart}`)
+							throw new ValidationError(`Array index too long at position ${bracketStart}`)
 						}
 					}
 					if (i >= input.length) {
-						throw new Error(`Unclosed array index at position ${bracketStart}`)
+						throw new ValidationError(`Unclosed array index at position ${bracketStart}`)
 					}
 					i++ // skip ]
 				} else {
@@ -184,7 +185,7 @@ export function tokenize(input: string): Token[] {
 			continue
 		}
 
-		throw new Error(`Unexpected character '${ch}' at position ${i}`)
+		throw new ValidationError(`Unexpected character '${ch}' at position ${i}`)
 	}
 
 	tokens.push({ type: "EOF", value: "", pos: i })

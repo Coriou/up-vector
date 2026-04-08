@@ -15,11 +15,17 @@ FROM oven/bun:1-alpine
 
 WORKDIR /app
 
+# curl is only used by the HEALTHCHECK below.
 RUN apk add --no-cache curl
 
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./
+# Copy artifacts as the non-root `bun` user (uid 1000) that ships with the
+# upstream image. Running as root would let a process escape into the rest of
+# the filesystem if it ever found an arbitrary-write bug.
+COPY --from=builder --chown=bun:bun /app/dist ./dist
+COPY --from=builder --chown=bun:bun /app/node_modules ./node_modules
+COPY --from=builder --chown=bun:bun /app/package.json ./
+
+USER bun
 
 EXPOSE 8080
 

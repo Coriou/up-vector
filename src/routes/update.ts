@@ -1,6 +1,6 @@
 import { Hono } from "hono"
-import { HTTPException } from "hono/http-exception"
 import { z } from "zod"
+import { ValidationError } from "../errors"
 import { getClient } from "../redis"
 import { loadDimension } from "../translate/index"
 import { validateId, validateNamespace, vectorKey } from "../translate/keys"
@@ -26,14 +26,35 @@ const UpdateBody = z.object({
 
 export const updateRoutes = new Hono()
 
+// Atomic update of an existing vector. The previous implementation did
+// `EXISTS key` followed by `HSET key …` from the application — between those
+// two calls another request could DELETE the key, leaving HSET to recreate a
+// half-formed hash with no `vec` field. This Lua script bundles the existence
+// check and all field writes into a single Redis-atomic step.
+//
+// Field layout (KEYS=1 key, ARGV=alternating field/value pairs):
+//   ARGV[i]   = field name
+//   ARGV[i+1] = field value
+//
+// Returns 1 if the vector existed and was updated, 0 otherwise.
+const ATOMIC_UPDATE_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then
+  return 0
+end
+if #ARGV > 0 then
+  redis.call('HSET', KEYS[1], unpack(ARGV))
+end
+return 1
+`
+
 // Atomic merge of new metadata into the existing metadata field on a hash. The
 // in-Redis check-then-set protects against lost-update races between concurrent
 // PATCH calls. Returns 1 if the key existed (and was updated), 0 otherwise.
 const PATCH_METADATA_LUA = `
-local existing = redis.call('HGET', KEYS[1], 'metadata')
-if not existing and redis.call('EXISTS', KEYS[1]) == 0 then
+if redis.call('EXISTS', KEYS[1]) == 0 then
   return 0
 end
+local existing = redis.call('HGET', KEYS[1], 'metadata')
 local merged = ARGV[1]
 if existing then
   local ok, base = pcall(cjson.decode, existing)
@@ -56,45 +77,62 @@ updateRoutes.post("/update/:namespace?", async (c) => {
 	const redis = getClient()
 	const key = vectorKey(ns, parsed.id)
 
-	// Check if vector exists
-	const exists = await redis.exists(key)
-	if (!exists) {
-		return c.json({ result: { updated: 0 } })
-	}
-
-	// Build HSET args — must use send("HSET") for binary vec field
-	const args: (string | Buffer)[] = [key]
-
-	// Update vector if provided (Zod already enforces dim >= 1)
+	// Validate vector dimension up front (Zod already enforces dim >= 1).
+	// We have to do this *before* the Lua call because the dimension cache lives
+	// in the application — Lua can't reach it.
 	if (parsed.vector) {
 		const existingDim = await loadDimension(ns)
 		if (existingDim !== undefined && parsed.vector.length !== existingDim) {
-			throw new HTTPException(400, {
-				message: `Dimension mismatch: namespace expects ${existingDim}, got ${parsed.vector.length}`,
-			})
-		}
-		args.push("vec", encodeVector(parsed.vector), "_vec", encodeVectorBase64(parsed.vector))
-	}
-
-	// Metadata in OVERWRITE mode is the trivial case — just stringify and HSET.
-	// PATCH mode runs through a Lua script for atomic read-merge-write so two
-	// concurrent PATCH calls can't lose updates between hget and hset.
-	if (parsed.metadata !== undefined) {
-		if (parsed.metadataUpdateMode === "PATCH") {
-			await redis.send("EVAL", [PATCH_METADATA_LUA, "1", key, JSON.stringify(parsed.metadata)])
-		} else {
-			args.push("metadata", JSON.stringify(parsed.metadata))
+			throw new ValidationError(
+				`Dimension mismatch: namespace expects ${existingDim}, got ${parsed.vector.length}`,
+			)
 		}
 	}
 
-	// Update data if provided
+	// Build the field/value pairs (excluding metadata, which goes through a
+	// dedicated path for PATCH mode). Vec needs the binary encoder; we cannot
+	// use redis.hset() here because Bun.redis UTF-8-encodes Buffer values.
+	const args: (string | Buffer)[] = []
+	if (parsed.vector) {
+		args.push("vec", encodeVector(parsed.vector))
+		args.push("_vec", encodeVectorBase64(parsed.vector))
+	}
+	if (parsed.metadata !== undefined && parsed.metadataUpdateMode !== "PATCH") {
+		args.push("metadata", JSON.stringify(parsed.metadata))
+	}
 	if (parsed.data !== undefined) {
 		args.push("data", parsed.data)
 	}
 
-	if (args.length > 1) {
-		await redis.send("HSET", args as string[])
+	// Run the atomic vector/data/overwrite-metadata update first.
+	let updated = 0
+	if (args.length > 0) {
+		const result = (await redis.send("EVAL", [
+			ATOMIC_UPDATE_LUA,
+			"1",
+			key,
+			...(args as string[]),
+		])) as number
+		if (result === 0) {
+			return c.json({ result: { updated: 0 } })
+		}
+		updated = 1
 	}
 
-	return c.json({ result: { updated: 1 } })
+	// PATCH metadata runs through its own atomic Lua so two concurrent PATCH
+	// calls can't lose updates between hget and hset.
+	if (parsed.metadata !== undefined && parsed.metadataUpdateMode === "PATCH") {
+		const result = (await redis.send("EVAL", [
+			PATCH_METADATA_LUA,
+			"1",
+			key,
+			JSON.stringify(parsed.metadata),
+		])) as number
+		if (result === 0 && updated === 0) {
+			return c.json({ result: { updated: 0 } })
+		}
+		updated = 1
+	}
+
+	return c.json({ result: { updated } })
 })

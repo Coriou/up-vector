@@ -1,3 +1,4 @@
+import { ValidationError } from "../errors"
 import type { FilterNode, Value } from "./types"
 
 export function evaluate(node: FilterNode, metadata: Record<string, unknown>): boolean {
@@ -155,7 +156,7 @@ const MAX_GLOB_CACHE_SIZE = 256
 
 export function globToRegex(pattern: string): RegExp {
 	if (pattern.length > MAX_GLOB_PATTERN_LENGTH) {
-		throw new Error(`Glob pattern too long (max ${MAX_GLOB_PATTERN_LENGTH} chars)`)
+		throw new ValidationError(`Glob pattern too long (max ${MAX_GLOB_PATTERN_LENGTH} chars)`)
 	}
 	const cached = globCache.get(pattern)
 	if (cached) return cached

@@ -3,7 +3,13 @@ import { z } from "zod"
 import type { FilterNode } from "../filter"
 import { compileFilter, evaluate } from "../filter"
 import { getClient } from "../redis"
-import { deleteKeysByPattern, validateNamespace, vectorKey, vectorPrefix } from "../translate/keys"
+import {
+	deleteKeysByPattern,
+	validateNamespace,
+	validatePrefix,
+	vectorKey,
+	vectorPrefix,
+} from "../translate/keys"
 
 const MAX_SCAN_ITERATIONS = 10_000
 const MAX_ID_LENGTH = 1024
@@ -45,6 +51,7 @@ const handleDelete = async (c: Context) => {
 
 	// Delete by prefix
 	if (parsed.prefix) {
+		validatePrefix(parsed.prefix)
 		const pattern = `${vectorPrefix(ns)}${parsed.prefix}*`
 		const deleted = await deleteKeysByPattern(pattern)
 		return c.json({ result: { deleted } })
@@ -85,14 +92,24 @@ async function deleteByFilter(
 			const toDelete: string[] = []
 			for (let i = 0; i < keys.length; i++) {
 				const raw = metadatas[i]
-				if (!raw) continue
+				// A vector with no metadata still needs to be evaluated against the
+				// filter: `HAS NOT FIELD x` should match it. Treat missing/invalid
+				// metadata as an empty object so the evaluator decides.
+				let meta: Record<string, unknown> = {}
+				if (raw) {
+					try {
+						meta = JSON.parse(raw) as Record<string, unknown>
+					} catch {
+						// Malformed metadata JSON — fall through with {}
+					}
+				}
 				try {
-					const meta = JSON.parse(raw) as Record<string, unknown>
 					if (evaluate(ast, meta)) {
 						toDelete.push(keys[i])
 					}
 				} catch {
-					// Invalid metadata JSON — skip
+					// Defensive: an evaluator failure should never abort the whole
+					// delete-by-filter — just skip this candidate.
 				}
 			}
 

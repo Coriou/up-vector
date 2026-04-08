@@ -33,6 +33,7 @@ export type QueryResult = {
 export type InfoResult = {
 	vectorCount: number
 	pendingVectorCount: number
+	indexSize: number
 	dimension: number
 	similarityFunction: string
 	namespaces: Record<string, { vectorCount: number; pendingVectorCount: number }>

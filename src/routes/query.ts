@@ -1,7 +1,7 @@
 import { Hono } from "hono"
-import { HTTPException } from "hono/http-exception"
 import { z } from "zod"
 import { config } from "../config"
+import { ValidationError } from "../errors"
 import type { FilterNode } from "../filter"
 import { compileFilter, evaluate } from "../filter"
 import { getClient } from "../redis"
@@ -73,9 +73,9 @@ async function executeQuery(ns: string, query: ParsedQuery): Promise<QueryResult
 	// we still catch dimension mismatches after a restart that left the cache cold.
 	const existingDim = await loadDimension(ns)
 	if (existingDim !== undefined && query.vector.length !== existingDim) {
-		throw new HTTPException(400, {
-			message: `Dimension mismatch: namespace expects ${existingDim}, got ${query.vector.length}`,
-		})
+		throw new ValidationError(
+			`Dimension mismatch: namespace expects ${existingDim}, got ${query.vector.length}`,
+		)
 	}
 
 	// Parse filter once for all candidates. compileFilter() also LRU-caches across
@@ -127,18 +127,18 @@ async function executeQuery(ns: string, query: ParsedQuery): Promise<QueryResult
 	const needsMetadata = filterAst !== undefined || query.includeMetadata
 	const candidates = parseFtSearchResponse(searchResult, needsMetadata)
 
-	// Apply filter + normalize scores + trim to topK
+	// Apply filter + normalize scores + trim to topK.
+	// A vector with no metadata still needs to be evaluated against the filter:
+	// e.g. `HAS NOT FIELD x` should *match* a vector with no metadata at all.
+	// Pass an empty object so the evaluator gets a stable shape.
 	const results: QueryResult[] = []
 	for (const candidate of candidates) {
-		// Apply metadata filter
-		if (filterAst && candidate.metadata) {
+		if (filterAst) {
 			try {
-				if (!evaluate(filterAst, candidate.metadata)) continue
+				if (!evaluate(filterAst, candidate.metadata ?? {})) continue
 			} catch {
-				continue // Malformed metadata or filter mismatch — skip
+				continue // Filter eval threw on this candidate — skip defensively
 			}
-		} else if (filterAst && !candidate.metadata) {
-			continue // No metadata to filter against
 		}
 
 		const result: QueryResult = {

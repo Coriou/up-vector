@@ -18,10 +18,13 @@ const handleReset = async (c: Context) => {
 	const redis = getClient()
 
 	if (all) {
-		// Reset all namespaces
+		// Reset every namespace we know about. We deliberately do *not* fall back
+		// to a blanket `v:*` SCAN here — that would clobber unrelated keys in a
+		// shared Redis instance, which has bitten people before. Instead we union
+		// the namespace registry with any indexes that exist as `idx:*`, then
+		// delete only those namespaces' key prefixes.
 		const namespaces = await redis.smembers(NS_REGISTRY)
 
-		// Also discover any orphaned indexes not in the registry
 		let allIndexes: string[] = []
 		try {
 			allIndexes = (await redis.send("FT._LIST", [])) as string[]
@@ -29,14 +32,13 @@ const handleReset = async (c: Context) => {
 			// FT._LIST may not be available in older Redis versions
 		}
 
-		// Drop everything we know about — registered namespaces plus any orphaned
-		// idx:* indexes — even if some drops fail. Use allSettled so one failure
-		// doesn't abort the rest of the cleanup.
-		const droppedSet = new Set(namespaces.map((n) => `idx:${n}`))
 		const orphanNamespaces = allIndexes
-			.filter((idx) => idx.startsWith("idx:") && !droppedSet.has(idx))
+			.filter((idx) => idx.startsWith("idx:"))
 			.map((idx) => idx.slice(4))
-		const dropTargets = [...namespaces, ...orphanNamespaces]
+		const dropTargets = Array.from(new Set([...namespaces, ...orphanNamespaces]))
+
+		// Drop indexes (best-effort) — failures shouldn't block the rest of the
+		// cleanup. Use allSettled so a missing/half-broken index doesn't abort.
 		const dropResults = await Promise.allSettled(dropTargets.map((n) => dropIndex(n)))
 		for (let i = 0; i < dropResults.length; i++) {
 			const result = dropResults[i]
@@ -48,7 +50,15 @@ const handleReset = async (c: Context) => {
 			}
 		}
 
-		await deleteKeysByPattern("v:*")
+		// Delete each namespace's key range explicitly. Doing it per-namespace
+		// keeps the SCAN MATCH narrow and bounded — and crucially never touches
+		// keys that don't belong to up-vector.
+		for (const n of dropTargets) {
+			await deleteKeysByPattern(`${vectorPrefix(n)}*`)
+		}
+
+		// Wipe the registry last so a partial failure leaves the registry as a
+		// pointer to the leftover keys.
 		await redis.del(NS_REGISTRY)
 	} else {
 		// Reset single namespace

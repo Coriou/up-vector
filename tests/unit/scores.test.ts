@@ -63,4 +63,31 @@ describe("normalizeScore", () => {
 			expect(typeof score).toBe("number")
 		})
 	})
+
+	describe("clamping (non-unit vectors)", () => {
+		// For non-normalized vectors, dot product is unbounded, so the
+		// raw "1 - dist/2" formula can drift outside [0, 1]. The normalizer
+		// must clamp so API consumers never see scores like 1.5 or -0.3.
+		test("DOT_PRODUCT score clamps to 1 when raw distance very negative", () => {
+			expect(normalizeScore(-3, "DOT_PRODUCT")).toBe(1)
+		})
+
+		test("DOT_PRODUCT score clamps to 0 when raw distance very positive", () => {
+			expect(normalizeScore(5, "DOT_PRODUCT")).toBe(0)
+		})
+
+		test("COSINE score clamps to 0 if Redis returns dist > 2", () => {
+			// Float drift can push cosine distance just past 2; clamp instead of
+			// returning a tiny negative.
+			expect(normalizeScore(2.0001, "COSINE")).toBe(0)
+		})
+
+		test("COSINE score clamps to 1 if Redis returns dist < 0", () => {
+			expect(normalizeScore(-0.0001, "COSINE")).toBe(1)
+		})
+
+		test("EUCLIDEAN score clamps to 1 for negative distance", () => {
+			expect(normalizeScore(-1, "EUCLIDEAN")).toBe(1)
+		})
+	})
 })

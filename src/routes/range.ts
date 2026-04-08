@@ -1,7 +1,7 @@
 import { Hono } from "hono"
 import { z } from "zod"
 import { getClient } from "../redis"
-import { parseVectorKey, validateNamespace, vectorPrefix } from "../translate/keys"
+import { parseVectorKey, validateNamespace, validatePrefix, vectorPrefix } from "../translate/keys"
 import { decodeVectorBase64 } from "../translate/vectors"
 import type { Vector } from "../types"
 
@@ -30,6 +30,7 @@ rangeRoutes.post("/range/:namespace?", async (c) => {
 	validateNamespace(ns)
 	const redis = getClient()
 
+	if (parsed.prefix) validatePrefix(parsed.prefix)
 	const basePrefix = vectorPrefix(ns)
 	const pattern = parsed.prefix ? `${basePrefix}${parsed.prefix}*` : `${basePrefix}*`
 

@@ -10,8 +10,26 @@ function routeLabel(path: string): string {
 	return match ? `/${match[1]}` : "/unknown"
 }
 
+// X-Request-ID is forwarded from clients when present so distributed traces
+// can pin the same id end-to-end. The value lands in our logs and goes back
+// out as a response header, so we cap it conservatively and reject anything
+// that could either bloat log lines or smuggle control characters / new lines
+// into our log output.
+const MAX_REQUEST_ID_LENGTH = 128
+const REQUEST_ID_CHARSET = /^[A-Za-z0-9_.-]+$/
+
+// Exported for unit testing — fetch() rejects control chars in header values
+// before they ever reach this code, so the only way to exercise the regex
+// branch is to call the sanitizer directly.
+export function sanitizeIncomingRequestId(raw: string | undefined): string | undefined {
+	if (!raw) return undefined
+	if (raw.length === 0 || raw.length > MAX_REQUEST_ID_LENGTH) return undefined
+	if (!REQUEST_ID_CHARSET.test(raw)) return undefined
+	return raw
+}
+
 export const loggerMiddleware: MiddlewareHandler = async (c, next) => {
-	const requestId = c.req.header("x-request-id") ?? crypto.randomUUID()
+	const requestId = sanitizeIncomingRequestId(c.req.header("x-request-id")) ?? crypto.randomUUID()
 	c.set("requestId", requestId)
 	c.header("X-Request-ID", requestId)
 

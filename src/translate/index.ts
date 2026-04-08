@@ -1,4 +1,5 @@
 import { config } from "../config"
+import { ValidationError } from "../errors"
 import { log } from "../logger"
 import { getClient } from "../redis"
 import { indexName, NS_REGISTRY } from "./keys"
@@ -48,7 +49,7 @@ export async function ensureIndex(ns: string, dimension: number): Promise<void> 
 	if (knownIndexes.has(idx)) {
 		const cached = dimensionMap.get(ns)
 		if (cached !== undefined && cached !== dimension) {
-			throw new Error(`Dimension mismatch: namespace expects ${cached}, got ${dimension}`)
+			throw new ValidationError(`Dimension mismatch: namespace expects ${cached}, got ${dimension}`)
 		}
 		return
 	}
@@ -59,7 +60,7 @@ export async function ensureIndex(ns: string, dimension: number): Promise<void> 
 		await pending
 		const cached = dimensionMap.get(ns)
 		if (cached !== undefined && cached !== dimension) {
-			throw new Error(`Dimension mismatch: namespace expects ${cached}, got ${dimension}`)
+			throw new ValidationError(`Dimension mismatch: namespace expects ${cached}, got ${dimension}`)
 		}
 		return
 	}
@@ -109,13 +110,15 @@ async function createIndexInternal(ns: string, dimension: number, idx: string): 
 					dimensionMap.set(ns, actualDim)
 					knownIndexes.add(idx)
 					if (actualDim !== dimension) {
-						throw new Error(`Dimension mismatch: namespace expects ${actualDim}, got ${dimension}`)
+						throw new ValidationError(
+							`Dimension mismatch: namespace expects ${actualDim}, got ${dimension}`,
+						)
 					}
 					return
 				}
 			} catch (infoErr) {
 				// Bubble up dimension mismatches; tolerate transient FT.INFO failures
-				if (infoErr instanceof Error && infoErr.message.includes("Dimension mismatch")) {
+				if (infoErr instanceof ValidationError) {
 					throw infoErr
 				}
 			}

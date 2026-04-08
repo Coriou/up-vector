@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { ValidationError } from "../../src/errors"
 import {
 	_clearFilterCache,
 	compileFilter,
@@ -685,6 +686,58 @@ describe("tokenizer hardening: bracket expressions", () => {
 		expect(tokenize("items[0]")[0].value).toBe("items[0]")
 		expect(tokenize("items[42]")[0].value).toBe("items[42]")
 		expect(tokenize("items[#-1]")[0].value).toBe("items[#-1]")
+	})
+})
+
+describe("filter errors are typed ValidationError", () => {
+	// All user-input errors thrown by the filter pipeline must be typed
+	// ValidationError so the global error handler classifies them as 400.
+	test("tokenizer throws ValidationError on bad input", () => {
+		expect(() => tokenize("name = @bad")).toThrow(ValidationError)
+		expect(() => tokenize("name = 'unterminated")).toThrow(ValidationError)
+		expect(() => tokenize("items[abc]")).toThrow(ValidationError)
+	})
+
+	test("parser throws ValidationError on syntax errors", () => {
+		expect(() => parse(tokenize("x ="))).toThrow(ValidationError)
+		expect(() => parse(tokenize("(x = 1"))).toThrow(ValidationError)
+		expect(() => parse(tokenize("x = 1 y = 2"))).toThrow(ValidationError)
+	})
+
+	test("globToRegex throws ValidationError on overly long pattern", () => {
+		expect(() => globToRegex("*".repeat(600))).toThrow(ValidationError)
+	})
+
+	test("filter length cap throws ValidationError", () => {
+		expect(() => tokenize(`${"x".repeat(8193)} = 'a'`)).toThrow(ValidationError)
+	})
+
+	test("nesting cap throws ValidationError", () => {
+		const open = "(".repeat(101)
+		const close = ")".repeat(101)
+		expect(() => parse(tokenize(`${open}x = 1${close}`))).toThrow(ValidationError)
+	})
+})
+
+describe("HAS NOT FIELD against missing metadata", () => {
+	// Regression: query.ts and delete.ts used to skip candidates with no
+	// metadata before consulting the filter. That was wrong for predicates
+	// like `HAS NOT FIELD x`, which should *match* a vector that has no
+	// metadata at all. The route layer now passes {} when metadata is
+	// absent, so the evaluator below mirrors that contract.
+
+	test("HAS NOT FIELD matches against empty metadata", () => {
+		expect(evaluateFilter("HAS NOT FIELD color", {})).toBe(true)
+	})
+
+	test("HAS FIELD does not match against empty metadata", () => {
+		expect(evaluateFilter("HAS FIELD color", {})).toBe(false)
+	})
+
+	test("'!=' against missing field on empty metadata is false", () => {
+		// missing fields are treated as undefined; comparisons against undefined
+		// return false, which matches Upstash semantics.
+		expect(evaluateFilter("color != 'red'", {})).toBe(false)
 	})
 })
 

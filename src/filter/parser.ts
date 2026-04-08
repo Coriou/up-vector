@@ -1,3 +1,4 @@
+import { ValidationError } from "../errors"
 import type { FilterNode, Token, Value } from "./types"
 
 const MAX_DEPTH = 100
@@ -8,7 +9,7 @@ export function parse(tokens: Token[]): FilterNode {
 
 	function guardDepth(): void {
 		if (++depth > MAX_DEPTH) {
-			throw new Error("Filter expression too deeply nested (max 100 levels)")
+			throw new ValidationError("Filter expression too deeply nested (max 100 levels)")
 		}
 	}
 
@@ -23,7 +24,7 @@ export function parse(tokens: Token[]): FilterNode {
 	function expect(type: string): Token {
 		const tok = peek()
 		if (tok.type !== type) {
-			throw new Error(`Expected ${type} but got ${tok.type} at position ${tok.pos}`)
+			throw new ValidationError(`Expected ${type} but got ${tok.type} at position ${tok.pos}`)
 		}
 		return advance()
 	}
@@ -39,7 +40,7 @@ export function parse(tokens: Token[]): FilterNode {
 			advance()
 			return tok.value as Value
 		}
-		throw new Error(`Expected value but got ${tok.type} at position ${tok.pos}`)
+		throw new ValidationError(`Expected value but got ${tok.type} at position ${tok.pos}`)
 	}
 
 	function parseValueList(): Value[] {
@@ -85,7 +86,7 @@ export function parse(tokens: Token[]): FilterNode {
 			return parseComparisonTail(field)
 		}
 
-		throw new Error(`Unexpected token ${tok.type} at position ${tok.pos}`)
+		throw new ValidationError(`Unexpected token ${tok.type} at position ${tok.pos}`)
 	}
 
 	function parseComparisonTail(field: string): FilterNode {
@@ -152,7 +153,7 @@ export function parse(tokens: Token[]): FilterNode {
 			return { type: "contains", field, value, negated: true }
 		}
 
-		throw new Error(
+		throw new ValidationError(
 			`Expected operator after field '${field}' but got ${tok.type} at position ${tok.pos}`,
 		)
 	}
@@ -181,7 +182,7 @@ export function parse(tokens: Token[]): FilterNode {
 
 	if (peek().type !== "EOF") {
 		const tok = peek()
-		throw new Error(`Unexpected token ${tok.type} at position ${tok.pos}`)
+		throw new ValidationError(`Unexpected token ${tok.type} at position ${tok.pos}`)
 	}
 
 	return ast

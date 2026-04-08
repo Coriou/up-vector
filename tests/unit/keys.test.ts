@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test"
+import { ValidationError } from "../../src/errors"
 import {
 	indexName,
 	NS_REGISTRY,
 	parseVectorKey,
 	validateId,
 	validateNamespace,
+	validatePrefix,
 	vectorKey,
 	vectorPrefix,
 } from "../../src/translate/keys"
@@ -148,5 +150,63 @@ describe("validateId hardening", () => {
 
 	test("accepts colons in IDs (the v:{ns}:{id} scheme tolerates them)", () => {
 		expect(() => validateId("user:42:profile")).not.toThrow()
+	})
+})
+
+describe("validatePrefix", () => {
+	test("accepts plain alphanumeric prefixes", () => {
+		expect(() => validatePrefix("doc-")).not.toThrow()
+		expect(() => validatePrefix("user:42:")).not.toThrow()
+	})
+
+	test("accepts empty string", () => {
+		expect(() => validatePrefix("")).not.toThrow()
+	})
+
+	test("rejects glob metacharacters that would escape the namespace subtree", () => {
+		expect(() => validatePrefix("foo*")).toThrow("glob characters")
+		expect(() => validatePrefix("foo?")).toThrow("glob characters")
+		expect(() => validatePrefix("foo[bar]")).toThrow("glob characters")
+		expect(() => validatePrefix("foo\\bar")).toThrow("glob characters")
+	})
+
+	test("rejects control characters", () => {
+		expect(() => validatePrefix("foo\nbar")).toThrow("control characters")
+		expect(() => validatePrefix("foo\x00bar")).toThrow("control characters")
+	})
+
+	test("rejects overly long prefix", () => {
+		expect(() => validatePrefix("x".repeat(1025))).toThrow("must not exceed")
+	})
+})
+
+describe("validators throw ValidationError (typed)", () => {
+	// These throws must be a typed ValidationError so the global error handler
+	// classifies them as 400 instead of falling through to the generic 500 path.
+	test("validateNamespace throws ValidationError", () => {
+		try {
+			validateNamespace("a:b")
+			throw new Error("expected throw")
+		} catch (err) {
+			expect(err).toBeInstanceOf(ValidationError)
+		}
+	})
+
+	test("validateId throws ValidationError", () => {
+		try {
+			validateId("")
+			throw new Error("expected throw")
+		} catch (err) {
+			expect(err).toBeInstanceOf(ValidationError)
+		}
+	})
+
+	test("validatePrefix throws ValidationError", () => {
+		try {
+			validatePrefix("a*")
+			throw new Error("expected throw")
+		} catch (err) {
+			expect(err).toBeInstanceOf(ValidationError)
+		}
 	})
 })
