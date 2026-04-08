@@ -27,13 +27,14 @@ function getHistogram(method: string): HistogramData {
 	return h
 }
 
-/** Sanitize a label value for Prometheus text exposition format */
+/** Sanitize a label value for Prometheus text exposition format. */
 function sanitizeLabel(value: string): string {
-	return value.replace(/[\\"/\n]/g, (ch) => {
+	// Prometheus exposition format requires escaping `\`, `"`, and newline.
+	// All other ASCII passes through unmodified.
+	return value.replace(/[\\"\n]/g, (ch) => {
 		if (ch === "\\") return "\\\\"
 		if (ch === '"') return '\\"'
-		if (ch === "\n") return "\\n"
-		return ch
+		return "\\n"
 	})
 }
 

@@ -10,10 +10,20 @@ const finiteNumber = z.number().refine((n) => Number.isFinite(n), {
 	message: "Vector values must be finite numbers (no NaN or Infinity)",
 })
 
+// Numeric IDs that aren't finite would silently become "NaN" / "Infinity"
+// strings after .transform(String) — reject them up front so users get a
+// clear validation error instead of a magic string ID.
+const idSchema = z
+	.union([
+		z.string(),
+		z.number().refine((n) => Number.isFinite(n), "Vector ID must be a finite number"),
+	])
+	.transform(String)
+
 const MAX_VECTOR_DIM = 16384
 
 const VectorSchema = z.object({
-	id: z.union([z.string(), z.number()]).transform(String),
+	id: idSchema,
 	vector: z
 		.array(finiteNumber)
 		.min(1, "Vector dimension must be at least 1")

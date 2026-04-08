@@ -31,7 +31,10 @@ const SingleQuery = z.object({
 	includeMetadata: z.boolean().default(false),
 	includeVectors: z.boolean().default(false),
 	includeData: z.boolean().default(false),
-	filter: z.string().optional(),
+	// Empty filter strings used to be silently treated as "no filter", which
+	// hid client bugs (e.g. dynamic filter builders that produce ""). Reject
+	// explicitly so the caller learns about the mistake.
+	filter: z.string().min(1, "Filter must not be empty").optional(),
 })
 
 const QueryBody = z.union([

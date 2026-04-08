@@ -157,4 +157,127 @@ describe("CRUD lifecycle", () => {
 		expect(vec[0]).toBeCloseTo(0, 4)
 		expect(vec[2]).toBeCloseTo(1, 4)
 	})
+
+	test("update vector is reflected in RediSearch index, not just _vec mirror", async () => {
+		// The previous test only verified the base64 _vec mirror round-trips.
+		// This one proves the binary `vec` blob (the field RediSearch indexes)
+		// is also being updated — without it, KNN queries would still rank by
+		// the OLD vector while fetch() returned the new one.
+		const ns = "vec-update-indexed"
+		await api("POST", `/upsert/${ns}`, [
+			{ id: "near-x", vector: [1, 0, 0] },
+			{ id: "near-z", vector: [0, 0, 1] },
+		])
+		await new Promise((r) => setTimeout(r, 500))
+
+		// Move near-x's vector all the way over to z. After update, querying
+		// for [0,0,1] should return BOTH ids with score ≈ 1.
+		await api("POST", `/update/${ns}`, { id: "near-x", vector: [0, 0, 1] })
+		await new Promise((r) => setTimeout(r, 500))
+
+		const { data } = await api("POST", `/query/${ns}`, {
+			vector: [0, 0, 1],
+			topK: 2,
+		})
+		const results = (data as { result: Array<{ id: string; score: number }> }).result
+		expect(results.length).toBe(2)
+		const byId = Object.fromEntries(results.map((r) => [r.id, r.score]))
+		expect(byId["near-x"]).toBeCloseTo(1, 2)
+		expect(byId["near-z"]).toBeCloseTo(1, 2)
+
+		await api("POST", `/reset/${ns}`)
+	})
+
+	test("update vector + PATCH metadata in one request is atomic", async () => {
+		// Regression: update.ts used to issue two EVAL calls (one for vector,
+		// one for PATCH metadata). A concurrent DELETE between them could
+		// silently lose the PATCH while the route still reported updated:1.
+		// The fix bundles both into a single Lua script.
+		const ns = "atomic-update-patch"
+		const id = "combo"
+		await api("POST", `/upsert/${ns}`, {
+			id,
+			vector: [1, 0, 0],
+			metadata: { a: 1, b: 2 },
+		})
+
+		const { data } = await api("POST", `/update/${ns}`, {
+			id,
+			vector: [0, 1, 0],
+			metadata: { c: 3 },
+			metadataUpdateMode: "PATCH",
+		})
+		expect((data as { result: { updated: number } }).result.updated).toBe(1)
+
+		const { data: fetched } = await api("POST", `/fetch/${ns}`, {
+			ids: [id],
+			includeMetadata: true,
+			includeVectors: true,
+		})
+		const vec = (
+			fetched as {
+				result: Array<{ vector: number[]; metadata: Record<string, number> }>
+			}
+		).result[0]
+		// Vector got the new value
+		expect(vec.vector[1]).toBeCloseTo(1, 4)
+		// PATCH preserved old keys AND added the new one
+		expect(vec.metadata).toEqual({ a: 1, b: 2, c: 3 })
+
+		await api("POST", `/reset/${ns}`)
+	})
+
+	test("update with no fields returns updated:0 without touching the key", async () => {
+		// A request with only the id and no vector / metadata / data should
+		// be a no-op — the new atomic path explicitly handles this.
+		const id = "no-op-update"
+		await api("POST", "/upsert", { id, vector: [1, 0, 0], metadata: { tag: "before" } })
+		const { data } = await api("POST", "/update", { id })
+		expect((data as { result: { updated: number } }).result.updated).toBe(0)
+		const { data: fetched } = await api("POST", "/fetch", {
+			ids: [id],
+			includeMetadata: true,
+		})
+		// The original metadata is still there
+		expect(
+			(fetched as { result: Array<{ metadata: { tag: string } }> }).result[0].metadata.tag,
+		).toBe("before")
+	})
+
+	test("rejects non-finite numeric ids with 400", async () => {
+		// JSON.stringify turns NaN/Infinity into null, but a non-JS client
+		// (or a permissive parser) can send `1e1000` which JSON.parse turns
+		// into Infinity. The schema should reject these instead of silently
+		// coercing to "Infinity"/"NaN" string IDs. We have to send the raw
+		// body to bypass JSON.stringify's null-coercion of non-finite numbers.
+		const TOKEN = process.env.UPVECTOR_TOKEN ?? "test-token-123"
+		const sendRaw = async (raw: string): Promise<number> => {
+			const res = await fetch("http://localhost:8080/upsert", {
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${TOKEN}`,
+					"Content-Type": "application/json",
+				},
+				body: raw,
+			})
+			return res.status
+		}
+		expect(await sendRaw('{"id": 1e1000, "vector": [1, 0, 0]}')).toBe(400)
+		expect(await sendRaw('{"id": -1e1000, "vector": [1, 0, 0]}')).toBe(400)
+	})
+
+	test("rejects empty filter strings on query and delete", async () => {
+		// Empty filter strings used to be silently treated as "no filter".
+		// They're almost always a client bug (dynamic filter builder produced
+		// an empty string), so reject explicitly.
+		const { status: queryStatus } = await api("POST", "/query", {
+			vector: [1, 0, 0],
+			topK: 5,
+			filter: "",
+		})
+		expect(queryStatus).toBe(400)
+
+		const { status: deleteStatus } = await api("POST", "/delete", { filter: "" })
+		expect(deleteStatus).toBe(400)
+	})
 })

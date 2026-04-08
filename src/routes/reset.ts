@@ -52,9 +52,20 @@ const handleReset = async (c: Context) => {
 
 		// Delete each namespace's key range explicitly. Doing it per-namespace
 		// keeps the SCAN MATCH narrow and bounded — and crucially never touches
-		// keys that don't belong to up-vector.
-		for (const n of dropTargets) {
-			await deleteKeysByPattern(`${vectorPrefix(n)}*`)
+		// keys that don't belong to up-vector. Run them in parallel; each
+		// per-namespace deleteKeysByPattern is already serial inside (SCAN +
+		// DEL loop) so concurrency = number of namespaces is bounded.
+		const deleteResults = await Promise.allSettled(
+			dropTargets.map((n) => deleteKeysByPattern(`${vectorPrefix(n)}*`)),
+		)
+		for (let i = 0; i < deleteResults.length; i++) {
+			const result = deleteResults[i]
+			if (result.status === "rejected") {
+				log.warn("deleteKeysByPattern failed during reset all", {
+					namespace: dropTargets[i],
+					error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+				})
+			}
 		}
 
 		// Wipe the registry last so a partial failure leaves the registry as a

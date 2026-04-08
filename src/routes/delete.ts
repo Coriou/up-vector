@@ -15,7 +15,10 @@ const MAX_SCAN_ITERATIONS = 10_000
 const MAX_ID_LENGTH = 1024
 
 const idSchema = z
-	.union([z.string(), z.number()])
+	.union([
+		z.string(),
+		z.number().refine((n) => Number.isFinite(n), "Vector ID must be a finite number"),
+	])
 	.transform(String)
 	.refine((s) => s.length > 0, "Vector ID must not be empty")
 	.refine((s) => s.length <= MAX_ID_LENGTH, `Vector ID must not exceed ${MAX_ID_LENGTH} characters`)
@@ -24,7 +27,9 @@ const DeleteBody = z
 	.object({
 		ids: z.array(idSchema).max(1000, "Batch must not exceed 1000 ids").optional(),
 		prefix: z.string().optional(),
-		filter: z.string().optional(),
+		// Empty filter strings used to silently fall through to the
+		// "nothing specified" branch and return `deleted: 0`. Reject explicitly.
+		filter: z.string().min(1, "Filter must not be empty").optional(),
 	})
 	.refine((data) => [data.ids, data.prefix, data.filter].filter(Boolean).length <= 1, {
 		message: "Only one of ids, prefix, or filter can be specified",

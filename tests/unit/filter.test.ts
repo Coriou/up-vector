@@ -323,6 +323,26 @@ describe("globToRegex", () => {
 		const r2 = globToRegex("cache_test_*")
 		expect(r1).toBe(r2) // same RegExp instance
 	})
+
+	test("hot patterns survive eviction (LRU, not FIFO)", () => {
+		// Regression: glob cache used to be FIFO — even a hot pattern got
+		// evicted just because it was inserted early. Re-accessing should
+		// refresh the LRU position so it stays cached.
+		const HOT = "hot_glob_pattern_*"
+		const hotInstance = globToRegex(HOT)
+		// Touch the hot pattern several times so it's the most-recently-used.
+		for (let i = 0; i < 5; i++) globToRegex(HOT)
+		// Then push 256 distinct patterns through the cache, more than enough
+		// to evict everything that isn't being touched.
+		for (let i = 0; i < 256; i++) {
+			globToRegex(`evict_${i}_*`)
+			// Periodically refresh the hot pattern's LRU position, mimicking a
+			// real workload where the hot filter is queried often.
+			if (i % 10 === 0) globToRegex(HOT)
+		}
+		// The hot pattern should still be the same RegExp instance.
+		expect(globToRegex(HOT)).toBe(hotInstance)
+	})
 })
 
 // ─── Evaluator ───────────────────────────────────────────────────────────────

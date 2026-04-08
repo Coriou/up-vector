@@ -6,6 +6,10 @@ let client: RedisClient | null = null
 let lastPingOk = true
 let lastPingTime = 0
 const PING_CACHE_MS = 1000
+// Bun.redis doesn't expose a per-command timeout, so the health probe wraps
+// PING in Promise.race. Without this, a hung TCP connection (e.g. partitioned
+// Redis) would block /health until the global request timeout fires.
+const PING_TIMEOUT_MS = 2000
 
 export function getClient(): RedisClient {
 	if (!client) {
@@ -53,7 +57,13 @@ export async function isRedisHealthy(): Promise<boolean> {
 	// Set time before PING to prevent concurrent callers from stampeding
 	lastPingTime = now
 	try {
-		const pong = await client.ping()
+		// Bun.redis has no per-command timeout, so race the PING against a
+		// short timer. A hung TCP connection (network partition, paused VM,
+		// etc.) would otherwise tie up health checks indefinitely.
+		const pong = await Promise.race([
+			client.ping(),
+			new Promise<null>((resolve) => setTimeout(() => resolve(null), PING_TIMEOUT_MS)),
+		])
 		lastPingOk = pong === "PONG"
 	} catch {
 		lastPingOk = false

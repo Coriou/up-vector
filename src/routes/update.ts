@@ -10,10 +10,20 @@ const finiteNumber = z.number().refine((n) => Number.isFinite(n), {
 	message: "Vector values must be finite numbers (no NaN or Infinity)",
 })
 
+// Numeric IDs that aren't finite would silently become "NaN" / "Infinity"
+// strings after the .transform(String) below — reject them up front so users
+// get a clear validation error instead of a magic string ID.
+const idSchema = z
+	.union([
+		z.string(),
+		z.number().refine((n) => Number.isFinite(n), "Vector ID must be a finite number"),
+	])
+	.transform(String)
+
 const MAX_VECTOR_DIM = 16384
 
 const UpdateBody = z.object({
-	id: z.union([z.string(), z.number()]).transform(String),
+	id: idSchema,
 	vector: z
 		.array(finiteNumber)
 		.min(1, "Vector dimension must be at least 1")
@@ -26,45 +36,47 @@ const UpdateBody = z.object({
 
 export const updateRoutes = new Hono()
 
-// Atomic update of an existing vector. The previous implementation did
-// `EXISTS key` followed by `HSET key …` from the application — between those
-// two calls another request could DELETE the key, leaving HSET to recreate a
-// half-formed hash with no `vec` field. This Lua script bundles the existence
-// check and all field writes into a single Redis-atomic step.
+// Single atomic update for an existing vector. Handles vector / data / OVERWRITE
+// metadata writes AND optional PATCH-merge of metadata in one Redis-atomic step
+// so a concurrent DELETE between phases can't (a) leave a half-formed hash or
+// (b) silently lose the PATCH while reporting `updated: 1`.
 //
-// Field layout (KEYS=1 key, ARGV=alternating field/value pairs):
-//   ARGV[i]   = field name
-//   ARGV[i+1] = field value
+// Layout:
+//   KEYS[1]   = vector key
+//   ARGV[1]   = "1" if metadata PATCH is requested, "0" otherwise
+//   ARGV[2]   = JSON-encoded patch (only meaningful when ARGV[1] == "1",
+//               otherwise the empty string)
+//   ARGV[3..] = alternating field/value pairs for the direct HSET
+//               (vector / data / OVERWRITE metadata)
 //
 // Returns 1 if the vector existed and was updated, 0 otherwise.
 const ATOMIC_UPDATE_LUA = `
 if redis.call('EXISTS', KEYS[1]) == 0 then
   return 0
 end
-if #ARGV > 0 then
-  redis.call('HSET', KEYS[1], unpack(ARGV))
-end
-return 1
-`
-
-// Atomic merge of new metadata into the existing metadata field on a hash. The
-// in-Redis check-then-set protects against lost-update races between concurrent
-// PATCH calls. Returns 1 if the key existed (and was updated), 0 otherwise.
-const PATCH_METADATA_LUA = `
-if redis.call('EXISTS', KEYS[1]) == 0 then
-  return 0
-end
-local existing = redis.call('HGET', KEYS[1], 'metadata')
-local merged = ARGV[1]
-if existing then
-  local ok, base = pcall(cjson.decode, existing)
-  if ok and type(base) == 'table' then
-    local patch = cjson.decode(ARGV[1])
-    for k, v in pairs(patch) do base[k] = v end
-    merged = cjson.encode(base)
+local patch_mode = ARGV[1]
+local patch_json = ARGV[2]
+local has_pairs = #ARGV > 2
+if has_pairs then
+  local pairs_args = {}
+  for i = 3, #ARGV do
+    pairs_args[#pairs_args + 1] = ARGV[i]
   end
+  redis.call('HSET', KEYS[1], unpack(pairs_args))
 end
-redis.call('HSET', KEYS[1], 'metadata', merged)
+if patch_mode == '1' then
+  local existing = redis.call('HGET', KEYS[1], 'metadata')
+  local merged = patch_json
+  if existing then
+    local ok, base = pcall(cjson.decode, existing)
+    if ok and type(base) == 'table' then
+      local patch = cjson.decode(patch_json)
+      for k, v in pairs(patch) do base[k] = v end
+      merged = cjson.encode(base)
+    end
+  end
+  redis.call('HSET', KEYS[1], 'metadata', merged)
+end
 return 1
 `
 
@@ -89,50 +101,38 @@ updateRoutes.post("/update/:namespace?", async (c) => {
 		}
 	}
 
-	// Build the field/value pairs (excluding metadata, which goes through a
-	// dedicated path for PATCH mode). Vec needs the binary encoder; we cannot
-	// use redis.hset() here because Bun.redis UTF-8-encodes Buffer values.
-	const args: (string | Buffer)[] = []
+	// Build the alternating field/value pairs for the direct HSET. Vec uses the
+	// binary encoder — we cannot use redis.hset() here because Bun.redis
+	// UTF-8-encodes Buffer values, corrupting the binary blob RediSearch indexes.
+	const pairs: (string | Buffer)[] = []
 	if (parsed.vector) {
-		args.push("vec", encodeVector(parsed.vector))
-		args.push("_vec", encodeVectorBase64(parsed.vector))
+		pairs.push("vec", encodeVector(parsed.vector))
+		pairs.push("_vec", encodeVectorBase64(parsed.vector))
 	}
 	if (parsed.metadata !== undefined && parsed.metadataUpdateMode !== "PATCH") {
-		args.push("metadata", JSON.stringify(parsed.metadata))
+		pairs.push("metadata", JSON.stringify(parsed.metadata))
 	}
 	if (parsed.data !== undefined) {
-		args.push("data", parsed.data)
+		pairs.push("data", parsed.data)
 	}
 
-	// Run the atomic vector/data/overwrite-metadata update first.
-	let updated = 0
-	if (args.length > 0) {
-		const result = (await redis.send("EVAL", [
-			ATOMIC_UPDATE_LUA,
-			"1",
-			key,
-			...(args as string[]),
-		])) as number
-		if (result === 0) {
-			return c.json({ result: { updated: 0 } })
-		}
-		updated = 1
+	const isPatch = parsed.metadata !== undefined && parsed.metadataUpdateMode === "PATCH"
+
+	// No-op request — nothing to update. Return updated:0 (matches Upstash:
+	// no field to write means no row to bump even if the key exists).
+	if (pairs.length === 0 && !isPatch) {
+		return c.json({ result: { updated: 0 } })
 	}
 
-	// PATCH metadata runs through its own atomic Lua so two concurrent PATCH
-	// calls can't lose updates between hget and hset.
-	if (parsed.metadata !== undefined && parsed.metadataUpdateMode === "PATCH") {
-		const result = (await redis.send("EVAL", [
-			PATCH_METADATA_LUA,
-			"1",
-			key,
-			JSON.stringify(parsed.metadata),
-		])) as number
-		if (result === 0 && updated === 0) {
-			return c.json({ result: { updated: 0 } })
-		}
-		updated = 1
-	}
+	const evalArgs: (string | Buffer)[] = [
+		ATOMIC_UPDATE_LUA,
+		"1",
+		key,
+		isPatch ? "1" : "0",
+		isPatch ? JSON.stringify(parsed.metadata) : "",
+		...pairs,
+	]
 
-	return c.json({ result: { updated } })
+	const result = (await redis.send("EVAL", evalArgs as string[])) as number
+	return c.json({ result: { updated: result === 1 ? 1 : 0 } })
 })

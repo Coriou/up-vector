@@ -159,7 +159,14 @@ export function globToRegex(pattern: string): RegExp {
 		throw new ValidationError(`Glob pattern too long (max ${MAX_GLOB_PATTERN_LENGTH} chars)`)
 	}
 	const cached = globCache.get(pattern)
-	if (cached) return cached
+	if (cached) {
+		// Refresh LRU position by re-inserting (matches the filter AST cache).
+		// Without this, hot patterns get evicted just because they were inserted
+		// early — defeating the point of caching them.
+		globCache.delete(pattern)
+		globCache.set(pattern, cached)
+		return cached
+	}
 
 	let regex = ""
 	let i = 0

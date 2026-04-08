@@ -14,7 +14,10 @@ import type { Vector } from "../types"
 const MAX_ID_LENGTH = 1024
 
 const idSchema = z
-	.union([z.string(), z.number()])
+	.union([
+		z.string(),
+		z.number().refine((n) => Number.isFinite(n), "Vector ID must be a finite number"),
+	])
 	.transform(String)
 	.refine((s) => s.length > 0, "Vector ID must not be empty")
 	.refine((s) => s.length <= MAX_ID_LENGTH, `Vector ID must not exceed ${MAX_ID_LENGTH} characters`)
