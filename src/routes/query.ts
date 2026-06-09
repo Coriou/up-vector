@@ -23,7 +23,7 @@ const finiteNumber = z.number().refine((n) => Number.isFinite(n), {
 	message: "Vector values must be finite numbers (no NaN or Infinity)",
 })
 
-const SingleQuery = z.object({
+export const DenseQuerySchema = z.object({
 	vector: z
 		.array(finiteNumber)
 		.min(1, "Vector dimension must be at least 1")
@@ -44,9 +44,9 @@ const SingleQuery = z.object({
 })
 
 const QueryBody = z.union([
-	SingleQuery,
+	DenseQuerySchema,
 	z
-		.array(SingleQuery)
+		.array(DenseQuerySchema)
 		.min(1, "Batch must contain at least one query")
 		.max(MAX_BATCH_QUERIES, `Batch must not exceed ${MAX_BATCH_QUERIES} queries`),
 ])
@@ -72,9 +72,9 @@ queryRoutes.post("/query/:namespace?", async (c) => {
 	return c.json({ result: results[0] })
 })
 
-type ParsedQuery = z.infer<typeof SingleQuery>
+export type DenseQuery = z.infer<typeof DenseQuerySchema>
 
-async function executeQuery(ns: string, query: ParsedQuery): Promise<QueryResult[]> {
+export async function executeQuery(ns: string, query: DenseQuery): Promise<QueryResult[]> {
 	const redis = getClient()
 	const idx = indexName(ns)
 

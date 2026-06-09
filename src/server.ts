@@ -5,6 +5,7 @@ import { authMiddleware } from "./middleware/auth"
 import { errorHandler } from "./middleware/error-handler"
 import { loggerMiddleware } from "./middleware/logger"
 import { timeoutMiddleware } from "./middleware/timeout"
+import { dataRoutes } from "./routes/data"
 import { deleteRoutes } from "./routes/delete"
 import { fetchRoutes } from "./routes/fetch"
 import { healthRoutes } from "./routes/health"
@@ -14,6 +15,7 @@ import { queryRoutes } from "./routes/query"
 import { randomRoutes } from "./routes/random"
 import { rangeRoutes } from "./routes/range"
 import { resetRoutes } from "./routes/reset"
+import { unsupportedRoutes } from "./routes/unsupported"
 import { updateRoutes } from "./routes/update"
 import { upsertRoutes } from "./routes/upsert"
 
@@ -63,7 +65,9 @@ app.use("/*", timeoutMiddleware)
 
 // Authenticated routes
 app.route("/", upsertRoutes)
+app.route("/", dataRoutes)
 app.route("/", queryRoutes)
+app.route("/", unsupportedRoutes)
 app.route("/", randomRoutes)
 app.route("/", fetchRoutes)
 app.route("/", deleteRoutes)

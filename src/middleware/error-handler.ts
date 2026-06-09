@@ -3,7 +3,7 @@ import type { ErrorHandler } from "hono"
 import { HTTPException } from "hono/http-exception"
 import { ZodError } from "zod"
 import { config } from "../config"
-import { ValidationError } from "../errors"
+import { EmbeddingProviderError, ValidationError } from "../errors"
 import { log } from "../logger"
 
 function statusText(status: number): string {
@@ -34,6 +34,11 @@ export const errorHandler: ErrorHandler = (err, c) => {
 	// unrelated errors whose message happens to contain a validator phrase.
 	if (err instanceof ValidationError) {
 		return c.json({ error: err.message, status: 400 }, 400)
+	}
+
+	if (err instanceof EmbeddingProviderError) {
+		const status = err.status === 400 || err.status === 504 ? err.status : 502
+		return c.json({ error: err.message, status }, status)
 	}
 
 	// Stack traces are only logged at debug level — they can leak file paths and

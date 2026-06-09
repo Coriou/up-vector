@@ -52,6 +52,14 @@ upsertRoutes.post("/upsert/:namespace?", async (c) => {
 	const vectors = Array.isArray(parsed) ? parsed : [parsed]
 
 	const ns = c.req.param("namespace") ?? ""
+	await upsertDenseVectors(ns, vectors)
+
+	return c.json({ result: "Success" })
+})
+
+export type DenseVectorInput = z.infer<typeof VectorSchema>
+
+export async function upsertDenseVectors(ns: string, vectors: DenseVectorInput[]): Promise<void> {
 	validateNamespace(ns)
 	const redis = getClient()
 
@@ -107,6 +115,4 @@ upsertRoutes.post("/upsert/:namespace?", async (c) => {
 	})
 	writes.push(redis.sadd(NS_REGISTRY, ns))
 	await Promise.all(writes)
-
-	return c.json({ result: "Success" })
-})
+}

@@ -12,3 +12,18 @@ export class ValidationError extends Error {
 		this.name = "ValidationError"
 	}
 }
+
+/**
+ * Thrown when server-side embedding is unavailable or the configured provider
+ * fails. The status is intentionally explicit because these errors are neither
+ * input schema failures nor generic server bugs.
+ */
+export class EmbeddingProviderError extends Error {
+	readonly status: number
+
+	constructor(message: string, status = 502) {
+		super(message)
+		this.name = "EmbeddingProviderError"
+		this.status = status
+	}
+}

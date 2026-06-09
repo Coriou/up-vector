@@ -4,9 +4,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Bun](https://img.shields.io/badge/runtime-Bun-f9f1e1?logo=bun)](https://bun.sh)
 
-Self-hosted [Upstash Vector](https://upstash.com/docs/vector/overall/getstarted)-compatible HTTP proxy for dense-vector workloads, backed by [Redis Stack](https://redis.io/docs/latest/operate/oss_and_stack/install/install-stack/).
+Self-hosted [Upstash Vector](https://upstash.com/docs/vector/overall/getstarted)-compatible HTTP proxy for dense-vector and raw-text RAG workloads, backed by [Redis Stack](https://redis.io/docs/latest/operate/oss_and_stack/install/install-stack/).
 
-Drop-in replacement for the dense-vector `@upstash/vector` SDK surface — point the SDK at your own server instead of Upstash's cloud. Uses Redis Stack (RediSearch) for HNSW vector indexing. Sibling project to [up-redis](https://github.com/Coriou/up-redis) (same idea, but for vectors).
+Drop-in replacement for the implemented dense-vector `@upstash/vector` SDK surface, plus `/upsert-data` and `/query-data` when you configure a server-side embedding provider. It is not a full Upstash Vector clone: sparse, hybrid, Upstash-hosted model behavior, and resumable query cursors are still unsupported. Uses Redis Stack (RediSearch) for HNSW vector indexing. Sibling project to [up-redis](https://github.com/Coriou/up-redis) (same idea, but for vectors).
 
 ## Quick Start
 
@@ -50,6 +50,60 @@ const results = await index.query({
 // Dense-vector SDK methods work: fetch, delete, update, range, reset, info, namespaces
 ```
 
+## RAG Quickstart
+
+### Client-generated embeddings
+
+Use this path when your application already calls OpenAI, Vercel AI SDK, LangChain, or another embedding provider. This is the most explicit and portable mode.
+
+```typescript
+const chunkEmbedding = await embed("Upstash Vector stores embeddings")
+
+await index.upsert({
+  id: "chunk-1",
+  vector: chunkEmbedding,
+  data: "Upstash Vector stores embeddings",
+  metadata: { source: "docs" },
+})
+
+const queryEmbedding = await embed("Where are embeddings stored?")
+const matches = await index.query({
+  vector: queryEmbedding,
+  topK: 5,
+  includeData: true,
+  includeMetadata: true,
+})
+```
+
+### Server-generated embeddings
+
+Set an embedding provider on the up-vector server, then use the current SDK's raw-text path. The SDK automatically sends these calls to `/upsert-data` and `/query-data`.
+
+```bash
+UPVECTOR_EMBEDDING_PROVIDER=openai
+UPVECTOR_EMBEDDING_API_KEY=sk-...
+UPVECTOR_EMBEDDING_MODEL=text-embedding-3-small
+# Optional but recommended when you want a fixed index dimension:
+UPVECTOR_EMBEDDING_DIMENSION=1536
+```
+
+```typescript
+await index.upsert({
+  id: "chunk-1",
+  data: "Upstash Vector stores embeddings",
+  metadata: { source: "docs" },
+})
+
+const matches = await index.query({
+  data: "Where are embeddings stored?",
+  topK: 5,
+  includeData: true,
+  includeMetadata: true,
+})
+```
+
+`/upsert-data` stores the original text in the vector's `data` field after embedding it. `/query-data` embeds the query text, then returns the same result shape as `/query`.
+
 ## REST API
 
 Works with any language — just send HTTP requests:
@@ -66,28 +120,42 @@ curl -X POST http://localhost:8080/query \
   -H "Authorization: Bearer your-token-here" \
   -H "Content-Type: application/json" \
   -d '{"vector":[0.1,0.2,0.3],"topK":5,"includeMetadata":true}'
+
+# Upsert raw text through the configured embedding provider
+curl -X POST http://localhost:8080/upsert-data \
+  -H "Authorization: Bearer your-token-here" \
+  -H "Content-Type: application/json" \
+  -d '[{"id":"doc-1","data":"Upstash Vector stores embeddings","metadata":{"source":"docs"}}]'
+
+# Query raw text through the configured embedding provider
+curl -X POST http://localhost:8080/query-data \
+  -H "Authorization: Bearer your-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{"data":"Where are embeddings stored?","topK":5,"includeData":true}'
 ```
 
 ## API Compatibility
 
-Implements the dense-vector subset of the [Upstash Vector REST API](https://upstash.com/docs/vector/api/endpoints), validated by 322 tests including 70 using the real `@upstash/vector` SDK.
+Implements the dense-vector subset of the [Upstash Vector REST API](https://upstash.com/docs/vector/api/endpoints), plus dense `/upsert-data` and `/query-data` through a configurable embedding provider. Validated by 342 tests including 73 using the real `@upstash/vector` SDK.
 
-| Endpoint | Status |
-|----------|--------|
-| `POST /upsert[/{namespace}]` | Supported for dense vectors |
-| `POST /query[/{namespace}]` | Supported for dense vectors (KNN + metadata filtering) |
-| `GET/POST /fetch[/{namespace}]` | Supported (by IDs and prefix) |
-| `DELETE/POST /delete[/{namespace}]` | Supported (by IDs, prefix, or filter) |
-| `POST /update[/{namespace}]` | Supported (OVERWRITE and PATCH modes) |
-| `GET/POST /range[/{namespace}]` | Supported (offset cursor pagination) |
-| `GET/POST /random[/{namespace}]` | Supported |
-| `DELETE/POST /reset[/{namespace}]` | Supported (single or all namespaces) |
-| `GET/POST /info` | Supported (`indexType: "DENSE"`) |
-| `GET/POST /list-namespaces` | Supported |
-| `DELETE/POST /delete-namespace/{ns}` | Supported |
-| `POST /rename-namespace` | Supported |
-
-Not implemented: sparse/hybrid vector payloads, `/upsert-data`, `/query-data` (require server-side embedding models), and `/resumable-query*` (stateful cursors).
+| Surface | Status | Notes |
+|----------|--------|-------|
+| Dense `POST /upsert[/{namespace}]` | Supported | Dense vectors, metadata, optional `data` |
+| Dense `POST /query[/{namespace}]` | Supported | KNN + metadata filtering; batch query supported |
+| `POST /upsert-data[/{namespace}]` | Supported | Dense only; requires `UPVECTOR_EMBEDDING_PROVIDER`; stores raw text as `data` |
+| `POST /query-data[/{namespace}]` | Supported | Dense only; requires `UPVECTOR_EMBEDDING_PROVIDER`; same result shape as `/query` |
+| `GET/POST /fetch[/{namespace}]` | Supported | IDs and prefix; include metadata/vectors/data |
+| `DELETE/POST /delete[/{namespace}]` | Supported | IDs, prefix, or filter |
+| `POST /update[/{namespace}]` | Supported | Dense vector, data, OVERWRITE and PATCH metadata |
+| `GET/POST /range[/{namespace}]` | Supported | Offset cursor pagination |
+| `GET/POST /random[/{namespace}]` | Supported | Returns one random dense vector or `null` |
+| `DELETE/POST /reset[/{namespace}]` | Supported | Single namespace or all namespaces |
+| `GET/POST /info` | Supported | Reports `indexType: "DENSE"` and namespace counts |
+| Namespace list/delete/rename | Supported | `list-namespaces`, `delete-namespace`, `rename-namespace` |
+| Sparse indexes and sparse vectors | Unsupported | Requests with `sparseVector` are rejected; see [sparse/hybrid architecture](./docs/architecture/sparse-hybrid.md) |
+| Hybrid indexes and fusion/query modes | Unsupported | No dense+sparse fusion yet |
+| Resumable query endpoints | Unsupported | Return explicit `501`; no cursor/session parity |
+| Upstash-hosted embedding models | Partial | OpenAI-compatible self-host/provider path only, not Upstash's hosted model catalog |
 
 ### Metadata Filtering
 
@@ -113,8 +181,9 @@ All operators: `=`, `!=`, `<`, `<=`, `>`, `>=`, `GLOB`, `NOT GLOB`, `IN`, `NOT I
 - Want the `@upstash/vector` SDK API without a cloud dependency
 
 **Use Upstash Cloud instead if you need:**
-- Server-side embeddings (built-in embedding models)
+- Upstash-hosted embedding models without operating your own provider credentials
 - Sparse or hybrid vector search
+- Resumable query cursors
 - DiskANN-level scale (millions of vectors)
 - Managed infrastructure with zero ops
 
@@ -122,7 +191,7 @@ All operators: `=`, `!=`, `<`, `<=`, `>`, `>=`, `GLOB`, `NOT GLOB`, `IN`, `NOT I
 |--------|---------|-----------|
 | ANN algorithm | DiskANN | HNSW (RediSearch) |
 | Metadata filtering | Server-side | App-level (over-fetch + filter) |
-| Embedding endpoints | Built-in models | Not supported — bring your own vectors |
+| Embedding endpoints | Built-in hosted models | OpenAI-compatible provider or bring your own vectors |
 
 For RAG workloads with topK of 5-20 and <100K vectors, the differences are negligible.
 
@@ -144,6 +213,19 @@ All environment variables are prefixed `UPVECTOR_`:
 | `UPVECTOR_REQUEST_TIMEOUT` | `30000` | Per-request timeout in milliseconds (`0` = disabled) |
 | `UPVECTOR_METRICS` | `false` | Enable Prometheus metrics at `GET /metrics` |
 | `UPVECTOR_MAX_BODY_SIZE` | `33554432` | Max request body size in bytes |
+| `UPVECTOR_EMBEDDING_PROVIDER` | `disabled` | `disabled`, `openai`, or `fake`. `fake` is deterministic and intended for tests/dev only |
+| `UPVECTOR_EMBEDDING_MODEL` | `text-embedding-3-small` | Model name sent to the OpenAI-compatible `/embeddings` endpoint |
+| `UPVECTOR_EMBEDDING_DIMENSION` | provider default | Expected embedding dimension. Also sent as `dimensions` to OpenAI-compatible providers when set |
+| `UPVECTOR_EMBEDDING_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible API base URL |
+| `UPVECTOR_EMBEDDING_API_KEY` | — | Required when `UPVECTOR_EMBEDDING_PROVIDER=openai` |
+| `UPVECTOR_EMBEDDING_TIMEOUT_MS` | `10000` | Per embedding request timeout (`0` = disabled) |
+| `UPVECTOR_EMBEDDING_RETRIES` | `2` | Retries for provider timeouts, HTTP 429, and HTTP 5xx responses |
+
+Operational caveats for `/upsert-data` and `/query-data`:
+- The provider is called synchronously inside the request path. Size your timeout and upstream rate limits accordingly.
+- `UPVECTOR_EMBEDDING_DIMENSION` must match `UPVECTOR_DIMENSION` when both are set.
+- Existing namespaces keep their original dense dimension; raw-text queries/upserts fail loudly if the provider returns a different dimension.
+- `fake` embeddings are deterministic but not semantically meaningful. They exist so CI and local tests do not need API keys.
 
 ## Health & Monitoring
 
@@ -200,13 +282,13 @@ bun run typecheck        # TypeScript check
 
 ### Testing
 
-322 tests across three tiers:
+342 tests across three tiers:
 
 | Tier | Tests | Purpose |
 |------|-------|---------|
-| **Unit** | 213 | Filter parser, vector encode/decode, score normalization, key naming, middleware/config hardening |
-| **Integration** | 39 | End-to-end REST behavior against Redis Stack |
-| **SDK Compatibility** | 70 | Real `@upstash/vector` SDK against up-vector |
+| **Unit** | 222 | Filter parser, embedding providers, vector encode/decode, score normalization, key naming, middleware/config hardening |
+| **Integration** | 47 | End-to-end REST behavior against Redis Stack, including raw-text data endpoints |
+| **SDK Compatibility** | 73 | Real `@upstash/vector` SDK against up-vector |
 
 ```bash
 ./scripts/test-all.sh    # Run everything (starts Redis + server automatically)
