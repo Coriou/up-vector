@@ -1,6 +1,6 @@
 # up-vector — Implementation Plan
 
-A self-hosted, Upstash Vector-compatible HTTP proxy backed by Redis Stack. Drop-in replacement for `@upstash/vector` — point the SDK at your own server instead of Upstash's cloud.
+A self-hosted, Upstash Vector-compatible HTTP proxy backed by Redis Stack. Drop-in replacement for implemented dense-vector `@upstash/vector` surfaces, plus dense raw-text RAG endpoints when a server-side embedding provider is configured.
 
 Sibling project to [up-redis](https://github.com/Coriou/up-redis) (same idea, but for vectors).
 
@@ -81,12 +81,12 @@ The `@upstash/vector` SDK sends ALL requests as HTTP POST with JSON body. We sup
 | `POST /rename-namespace` | n/a | P1 | Supported | Move keys, rebuild index, update registry |
 | `GET /` | GET | P0 | Supported | Health check |
 | Sparse/hybrid vector payloads | POST | P2 | Deferred | Dense-only backend; reject explicitly |
-| `POST /upsert-data[/{ns}]` | POST | P2 | Deferred | Requires server-side embedding model |
-| `POST /query-data[/{ns}]` | POST | P2 | Deferred | Requires server-side embedding model |
-| `POST /resumable-query[/{ns}]` | POST | P2 | Deferred | Stateful cursors |
-| `POST /resumable-query-data[/{ns}]` | POST | P2 | Deferred | Stateful cursors + embedding |
-| `POST /resumable-query-next` | POST | P2 | Deferred | Stateful cursors |
-| `POST /resumable-query-end` | POST | P2 | Deferred | Stateful cursors |
+| `POST /upsert-data[/{ns}]` | POST | P1 | Supported | Dense only; embeds raw text through configured provider and stores it as `data` |
+| `POST /query-data[/{ns}]` | POST | P1 | Supported | Dense only; embeds query text then reuses dense query execution |
+| `POST /resumable-query[/{ns}]` | POST | P2 | Unsupported | Explicit 501; stateful cursor semantics deferred |
+| `POST /resumable-query-data[/{ns}]` | POST | P2 | Unsupported | Explicit 501; stateful cursor semantics deferred |
+| `POST /resumable-query-next` | POST | P2 | Unsupported | Explicit 501; stateful cursor semantics deferred |
+| `POST /resumable-query-end` | POST | P2 | Unsupported | Explicit 501; stateful cursor semantics deferred |
 
 ### Response Envelope
 
@@ -159,7 +159,9 @@ Rationale: Application-level metadata filtering is simpler to implement correctl
 | Upstash Vector | Redis Stack Commands |
 |---|---|
 | **upsert** | `HSET v:{ns}:{id} vec <blob> metadata <json> data <str> id <id>` (+ lazy `FT.CREATE` on first upsert per namespace) |
+| **upsert-data** | Embed raw text with configured provider → same storage path as upsert, with `data` set to the raw text |
 | **query** | `FT.SEARCH idx:{ns} "*=>[KNN {topK * overFetchFactor} @vec $BLOB AS score]" PARAMS 2 BLOB <bytes> SORTBY score LIMIT 0 {topK * overFetchFactor} DIALECT 2` → then app-level metadata filter → trim to topK |
+| **query-data** | Embed raw query text with configured provider → same query path as dense query |
 | **fetch by IDs** | `HGETALL v:{ns}:{id}` per ID (pipelined) |
 | **fetch by prefix** | `SCAN 0 MATCH v:{ns}:{prefix}* COUNT 100` → `HGETALL` per match |
 | **delete by IDs** | `DEL v:{ns}:{id1} v:{ns}:{id2} ...` |
@@ -255,6 +257,27 @@ const fetchCount = Math.min(topK * OVER_FETCH_FACTOR, MAX_OVER_FETCH)
 ```
 
 If after filtering we have fewer than `topK` results, we can re-query with a larger fetch (doubling strategy). This is a pragmatic approach — for most RAG workloads with light filtering, the first pass will suffice.
+
+---
+
+## Server-Side Embedding Provider
+
+`/upsert-data` and `/query-data` are intentionally provider-backed rather than pretending to be Upstash-hosted embedding models. Current provider modes:
+
+| Provider | Status | Notes |
+|----------|--------|-------|
+| `disabled` | Default | Raw-text endpoints return a clear 400. Dense vector endpoints continue to work. |
+| `openai` | Supported | Calls an OpenAI-compatible `POST /embeddings` endpoint with `model`, `input`, and optional `dimensions`. |
+| `fake` | Test/dev only | Deterministic vectors for CI and local tests. Not semantic. |
+
+Operational rules:
+- Provider calls are timeout-bounded by `UPVECTOR_EMBEDDING_TIMEOUT_MS`.
+- Timeout, HTTP 429, and HTTP 5xx responses are retried up to `UPVECTOR_EMBEDDING_RETRIES`.
+- Returned embedding dimensions are validated against `UPVECTOR_EMBEDDING_DIMENSION` when set.
+- Existing namespace dimensions are validated before writes/queries proceed.
+- `UPVECTOR_DIMENSION` and `UPVECTOR_EMBEDDING_DIMENSION` must match when both are set.
+
+This is not exact parity with Upstash-hosted model provisioning. It is a practical RAG path for self-hosters who already operate an OpenAI-compatible embedding provider.
 
 ---
 
@@ -504,7 +527,6 @@ Spin up Redis Stack (in Docker or locally), run operations end-to-end:
 The `tests/compatibility/` suite uses the real `@upstash/vector` TypeScript SDK as the client and points it at up-vector. This is the ultimate compatibility check for the dense-vector SDK surface because it exercises the same request paths, envelopes, and response parsing production applications use.
 
 Coverage intentionally excludes:
-- Embedding-related behavior (`/upsert-data`, `/query-data`)
 - Sparse/hybrid payloads and fusion/query-mode options
 - Resumable queries
 - Upstash-specific provisioning APIs
@@ -546,7 +568,7 @@ jobs:
 - Metadata storage and retrieval
 - Bearer token authentication
 - JSON request/response envelope format
-- The `@upstash/vector` TypeScript SDK (just swap the URL)
+- The implemented dense and raw-text `@upstash/vector` TypeScript SDK calls (just swap the URL and configure embeddings when using `data`)
 
 ### Known differences from Upstash
 
@@ -554,9 +576,9 @@ jobs:
 |--------|---------|-----------|--------|
 | ANN algorithm | DiskANN | HNSW (RediSearch) | Slightly different recall characteristics at very high scale. Negligible at <100K vectors. |
 | Metadata filtering | Server-side (DiskANN-integrated) | App-level (v1) / RediSearch (v2) | May return slightly different results when filter + topK interact (over-fetch compensates) |
-| Embedding endpoints | Built-in models | Not supported (v1) | Client must provide vectors. Use AI SDK for embedding. |
-| Sparse/hybrid | Full support | Not supported (v1) | Dense-only. Fine for standard RAG. |
-| Resumable queries | Supported | Not supported (v1) | Use range for iteration instead. |
+| Embedding endpoints | Built-in hosted models | OpenAI-compatible provider, or client-provided vectors | No Upstash-hosted model catalog or provisioning parity. |
+| Sparse/hybrid | Full support | Not supported (v1) | Dense-only. See `docs/architecture/sparse-hybrid.md` before implementation. |
+| Resumable queries | Supported | Explicit 501 unsupported | Use regular query/range; do not expect cursor/session semantics. |
 | Index creation | Dashboard/API | Automatic (lazy on first upsert) | No separate provisioning step needed. |
 | Multi-index | Per-database | Per-namespace (same Redis) | Equivalent functionality via namespaces. |
 

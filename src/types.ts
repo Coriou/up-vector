@@ -40,6 +40,7 @@ export type InfoResult = {
 	denseIndex: {
 		dimension: number
 		similarityFunction: string
+		embeddingModel?: string
 	}
 	namespaces: Record<string, { vectorCount: number; pendingVectorCount: number }>
 }

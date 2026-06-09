@@ -46,6 +46,9 @@ jobs:
     env:
       UPVECTOR_TOKEN: test-token-123
       UPVECTOR_REDIS_URL: redis://localhost:6379
+      UPVECTOR_EMBEDDING_PROVIDER: fake
+      UPVECTOR_EMBEDDING_MODEL: fake-embedding
+      UPVECTOR_EMBEDDING_DIMENSION: 8
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

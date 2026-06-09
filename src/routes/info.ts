@@ -65,6 +65,9 @@ const handleInfo = async (c: Context) => {
 			denseIndex: {
 				dimension: detectedDimension,
 				similarityFunction: config.metric,
+				...(config.embeddingProvider !== "disabled"
+					? { embeddingModel: config.embeddingModel }
+					: {}),
 			},
 			namespaces,
 		},
