@@ -31,6 +31,12 @@ describe("SDK: range", () => {
 		expect(allVectors.length).toBe(10)
 	})
 
+	test("should never return more than the requested limit", async () => {
+		const page = await index.range({ cursor: "0", limit: 3 })
+		expect(page.vectors.length).toBeLessThanOrEqual(3)
+		expect(page.nextCursor).toBe("3")
+	})
+
 	test("should include metadata when requested", async () => {
 		const page = await index.range({ cursor: "0", limit: 5, includeMetadata: true })
 		for (const v of page.vectors) {

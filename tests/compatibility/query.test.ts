@@ -170,4 +170,11 @@ describe("SDK: query", () => {
 		expect(results[0][0].metadata).toBeDefined()
 		expect(results[1][0].metadata).toBeUndefined()
 	})
+
+	test("should handle single-query queryMany normalization", async () => {
+		const results = await index.queryMany([{ vector: baseVec, topK: 2 }])
+		expect(results.length).toBe(1)
+		expect(results[0].length).toBe(2)
+		expect(results[0][0].id).toBe("q1")
+	})
 })

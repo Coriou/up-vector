@@ -24,6 +24,32 @@ describe("SDK: update", () => {
 		expect(fetched?.metadata).toEqual({ a: 1, b: 2, c: 3 })
 	})
 
+	test("should update metadata (PATCH) with RFC 7396 null deletion and nested merge", async () => {
+		const id = randomID()
+		await index.upsert({
+			id,
+			vector: randomVector(),
+			metadata: {
+				a: 1,
+				removeMe: "yes",
+				nested: { keep: true, replace: "old" },
+			},
+		})
+		await index.update({
+			id,
+			metadata: {
+				removeMe: null,
+				nested: { replace: "new", add: 2 },
+			},
+			metadataUpdateMode: "PATCH",
+		})
+		const [fetched] = await index.fetch([id], { includeMetadata: true })
+		expect(fetched?.metadata).toEqual({
+			a: 1,
+			nested: { keep: true, replace: "new", add: 2 },
+		})
+	})
+
 	test("should update data field", async () => {
 		const id = randomID()
 		await index.upsert({ id, vector: randomVector(), data: "old" })

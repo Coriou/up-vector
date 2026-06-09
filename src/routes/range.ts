@@ -1,4 +1,4 @@
-import { Hono } from "hono"
+import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { getClient } from "../redis"
 import { parseVectorKey, validateNamespace, validatePrefix, vectorPrefix } from "../translate/keys"
@@ -23,7 +23,7 @@ const MAX_SCAN_ITERATIONS = 10_000
 
 export const rangeRoutes = new Hono()
 
-rangeRoutes.post("/range/:namespace?", async (c) => {
+const handleRange = async (c: Context) => {
 	const body = await c.req.json()
 	const parsed = RangeBody.parse(body)
 	const ns = c.req.param("namespace") ?? ""
@@ -34,40 +34,37 @@ rangeRoutes.post("/range/:namespace?", async (c) => {
 	const basePrefix = vectorPrefix(ns)
 	const pattern = parsed.prefix ? `${basePrefix}${parsed.prefix}*` : `${basePrefix}*`
 
-	// Accumulate keys across SCAN iterations. SCAN COUNT is a hint, not a hard
-	// cap, so a single call may return more than `limit`. Crucially, we must
-	// process the *entire* batch from each SCAN call before checking `limit` —
-	// breaking mid-batch and returning the post-batch cursor would silently drop
-	// the unprocessed keys (the cursor points past them and they're never seen
-	// on the next page). Cursors are kept as strings to avoid precision loss
-	// above 2^53.
-	let scanCursor = parsed.cursor === "" ? "0" : parsed.cursor
-	const collectedKeys: string[] = []
+	// Upstash's public cursor is an offset string ("0", "100", ...), not a
+	// Redis SCAN cursor. Scan the namespace, sort for stable paging, then slice by
+	// offset so the endpoint never returns more than `limit`.
+	const offset = parsed.cursor === "" ? 0 : Number(parsed.cursor)
+	let scanCursor = "0"
+	const collectedKeys = new Set<string>()
 	const seenKeys = new Set<string>()
-	let lastRawCursor = "0"
 	let iterations = 0
 
 	do {
 		if (++iterations > MAX_SCAN_ITERATIONS) break
-		const result = await redis.scan(scanCursor, "MATCH", pattern, "COUNT", parsed.limit)
-		const [rawCursor, keys] = result as unknown as [string, string[]]
-		lastRawCursor = rawCursor
+		const result = await redis.scan(scanCursor, "MATCH", pattern, "COUNT", 100)
+		const [next, keys] = result as unknown as [string, string[]]
 
 		for (const key of keys) {
 			// SCAN can return duplicate keys across iterations — deduplicate
 			if (seenKeys.has(key)) continue
 			seenKeys.add(key)
-			collectedKeys.push(key)
+			collectedKeys.add(key)
 		}
 
-		scanCursor = lastRawCursor
-		// Stop *after* processing the full batch — never mid-batch
-		if (collectedKeys.length >= parsed.limit) break
-	} while (lastRawCursor !== "0")
+		scanCursor = next
+	} while (scanCursor !== "0")
+
+	const pageKeys = Array.from(collectedKeys)
+		.sort()
+		.slice(offset, offset + parsed.limit)
 
 	// Fetch details for each matched key
 	const vectors: Vector[] = await Promise.all(
-		collectedKeys.map(async (key) => {
+		pageKeys.map(async (key) => {
 			const hash = await redis.hgetall(key)
 			const parsedKey = parseVectorKey(key)
 			const id = parsedKey?.id ?? hash?.id ?? key
@@ -90,8 +87,11 @@ rangeRoutes.post("/range/:namespace?", async (c) => {
 		}),
 	)
 
-	// Map Redis done-cursor ("0") to Upstash done-signal ("")
-	const nextCursor = lastRawCursor === "0" ? "" : lastRawCursor
+	const nextOffset = offset + pageKeys.length
+	const nextCursor = nextOffset >= collectedKeys.size ? "" : String(nextOffset)
 
 	return c.json({ result: { nextCursor, vectors } })
-})
+}
+
+rangeRoutes.get("/range/:namespace?", handleRange)
+rangeRoutes.post("/range/:namespace?", handleRange)

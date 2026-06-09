@@ -48,11 +48,11 @@ Sibling project to [up-redis](https://github.com/Coriou/up-redis) (same idea, bu
 
 | Layer | Choice | Version | Why |
 |-------|--------|---------|-----|
-| Runtime | Bun | latest (1.2+) | Native TS, fastest JS runtime, built-in test runner |
+| Runtime | Bun | 1.3+ | Native TS, fastest JS runtime, built-in test runner |
 | HTTP | Hono | v4 | Lightweight, fast, great middleware, portable |
-| Redis client | Bun.redis | built-in | Native Bun Redis client, 7.9x faster than Bun.redis, `send()` for raw FT.* commands, zero deps |
-| Validation | Zod | v3 | Request body validation, type inference |
-| Linting/Format | Biome | v1 | Fast, modern, replaces ESLint+Prettier |
+| Redis client | Bun.redis | built-in | Native Bun Redis client with `send()` for raw FT.* commands, zero deps |
+| Validation | Zod | v4 | Request body validation, type inference |
+| Linting/Format | Biome | v2 | Fast, modern, replaces ESLint+Prettier |
 | Testing | Bun test | built-in | Fast, Jest-compatible API |
 | Container | Bun Alpine | oven/bun:alpine | Minimal image size |
 | Vector backend | Redis Stack | latest (7.4+) | RediSearch HNSW, production-grade, FT.* commands |
@@ -61,23 +61,26 @@ Sibling project to [up-redis](https://github.com/Coriou/up-redis) (same idea, bu
 
 ## API Compatibility Matrix
 
-### Endpoints — Full Upstash Vector REST API
+### Endpoints — Dense-Vector Upstash Vector REST API Subset
 
 The `@upstash/vector` SDK sends ALL requests as HTTP POST with JSON body. We support both the SDK's POST-only pattern and the documented HTTP methods for curl/raw usage.
 
 | Endpoint | SDK Method | Priority | Status | Notes |
 |----------|-----------|----------|--------|-------|
-| `POST /upsert[/{ns}]` | POST | P0 | Planned | Core — HSET + lazy FT.CREATE |
-| `POST /query[/{ns}]` | POST | P0 | Planned | Core — FT.SEARCH KNN |
-| `POST /fetch[/{ns}]` | POST | P0 | Planned | Core — HGETALL per ID |
-| `POST /delete[/{ns}]` | POST | P0 | Planned | Core — DEL keys |
-| `POST /update[/{ns}]` | POST | P0 | Planned | Core — HSET partial update |
-| `POST /range[/{ns}]` | POST | P0 | Planned | Core — SCAN/FT.SEARCH with LIMIT |
-| `DELETE /reset[/{ns}]` | POST | P0 | Planned | FT.DROPINDEX + key cleanup |
-| `GET /info` | POST | P0 | Planned | FT.INFO + key count |
-| `GET /list-namespaces` | POST | P1 | Planned | SMEMBERS on namespace registry |
-| `DELETE /delete-namespace/{ns}` | POST | P1 | Planned | Drop index + keys + registry entry |
-| `GET /` | GET | P0 | Planned | Health check |
+| `POST /upsert[/{ns}]` | POST | P0 | Supported | Dense vectors — HSET + lazy FT.CREATE |
+| `POST /query[/{ns}]` | POST | P0 | Supported | Dense KNN via FT.SEARCH |
+| `GET/POST /fetch[/{ns}]` | POST | P0 | Supported | HGETALL per ID, prefix scan |
+| `DELETE/POST /delete[/{ns}]` | POST | P0 | Supported | DEL keys by id, prefix, or filter |
+| `POST /update[/{ns}]` | POST | P0 | Supported | Atomic Lua update, RFC 7396 metadata PATCH |
+| `GET/POST /range[/{ns}]` | POST | P0 | Supported | Offset cursor pagination |
+| `GET/POST /random[/{ns}]` | n/a | P1 | Supported | Reservoir sample over namespace keys |
+| `DELETE/POST /reset[/{ns}]` | POST | P0 | Supported | FT.DROPINDEX + key cleanup |
+| `GET/POST /info` | POST | P0 | Supported | FT.INFO + key count, `indexType: DENSE` |
+| `GET/POST /list-namespaces` | POST | P1 | Supported | SMEMBERS on namespace registry |
+| `DELETE/POST /delete-namespace/{ns}` | POST | P1 | Supported | Drop index + keys + registry entry |
+| `POST /rename-namespace` | n/a | P1 | Supported | Move keys, rebuild index, update registry |
+| `GET /` | GET | P0 | Supported | Health check |
+| Sparse/hybrid vector payloads | POST | P2 | Deferred | Dense-only backend; reject explicitly |
 | `POST /upsert-data[/{ns}]` | POST | P2 | Deferred | Requires server-side embedding model |
 | `POST /query-data[/{ns}]` | POST | P2 | Deferred | Requires server-side embedding model |
 | `POST /resumable-query[/{ns}]` | POST | P2 | Deferred | Stateful cursors |
@@ -348,44 +351,46 @@ Like up-redis's file mode, support a JSON config mapping tokens to separate Redi
 
 - [x] Project setup (package.json, tsconfig, Docker, Biome)
 - [x] PLAN.md
-- [ ] Hono server with auth middleware and error handling
-- [ ] Redis connection with Bun.redis
-- [ ] Vector encode/decode utilities
-- [ ] Key naming module
-- [ ] Health endpoint (`GET /`)
+- [x] Hono server with auth middleware and error handling
+- [x] Redis connection with Bun.redis
+- [x] Vector encode/decode utilities
+- [x] Key naming module
+- [x] Health endpoint (`GET /`)
 
 ### Phase 2 — CRUD Operations
 
-- [ ] `POST /upsert` — HSET + lazy FT.CREATE
-- [ ] `POST /fetch` — HGETALL (by IDs and prefix)
-- [ ] `POST /delete` — DEL (by IDs and prefix)
-- [ ] `POST /update` — partial HSET
-- [ ] `POST /range` — SCAN-based cursor pagination
-- [ ] `DELETE /reset` — drop index + keys
+- [x] `POST /upsert` — HSET + lazy FT.CREATE
+- [x] `GET/POST /fetch` — HGETALL (by IDs and prefix)
+- [x] `DELETE/POST /delete` — DEL (by IDs, prefix, and filter)
+- [x] `POST /update` — atomic vector/data/metadata update
+- [x] `GET/POST /range` — offset cursor pagination
+- [x] `GET/POST /random` — random dense vector fetch
+- [x] `DELETE/POST /reset` — drop index + keys
 
 ### Phase 3 — Query + Filtering
 
-- [ ] `POST /query` — FT.SEARCH KNN
-- [ ] Score normalization (COSINE, EUCLIDEAN, DOT_PRODUCT)
-- [ ] Filter tokenizer
-- [ ] Filter parser (recursive descent)
-- [ ] Filter evaluator
-- [ ] Over-fetch + app-level filter + trim pipeline
-- [ ] `POST /delete` with filter (fetch → filter → delete)
+- [x] `POST /query` — FT.SEARCH KNN
+- [x] Score normalization (COSINE, EUCLIDEAN, DOT_PRODUCT)
+- [x] Filter tokenizer
+- [x] Filter parser (recursive descent)
+- [x] Filter evaluator
+- [x] Over-fetch + app-level filter + trim pipeline
+- [x] `POST /delete` with filter (fetch → filter → delete)
 
 ### Phase 4 — Namespaces + Info
 
-- [ ] Namespace registry (Redis Set)
-- [ ] `GET /list-namespaces`
-- [ ] `DELETE /delete-namespace/{ns}`
-- [ ] `GET /info` — aggregate stats across namespaces
+- [x] Namespace registry (Redis Set)
+- [x] `GET/POST /list-namespaces`
+- [x] `DELETE/POST /delete-namespace/{ns}`
+- [x] `POST /rename-namespace`
+- [x] `GET/POST /info` — aggregate stats across namespaces
 
 ### Phase 5 — Testing + Compatibility
 
-- [ ] Unit tests (filter parser is the big one)
-- [ ] Integration tests against Redis Stack in Docker
-- [ ] Compatibility test: run `@upstash/vector` SDK test suite against up-vector
-- [ ] CI pipeline (GitHub Actions: build → Redis Stack → test)
+- [x] Unit tests (filter parser is the big one)
+- [x] Integration tests against Redis Stack in Docker
+- [x] Compatibility tests with the real `@upstash/vector` SDK against up-vector
+- [x] CI pipeline (GitHub Actions: build → Redis Stack → test)
 
 ### Phase 6 — Production Hardening
 
@@ -496,12 +501,13 @@ Spin up Redis Stack (in Docker or locally), run operations end-to-end:
 
 ### 3. Compatibility Tests (the up-redis approach)
 
-Clone `upstash/vector-js`, configure it to point at up-vector, run its test suite. This is the ultimate compatibility check — same strategy that makes up-redis reliable.
+The `tests/compatibility/` suite uses the real `@upstash/vector` TypeScript SDK as the client and points it at up-vector. This is the ultimate compatibility check for the dense-vector SDK surface because it exercises the same request paths, envelopes, and response parsing production applications use.
 
-The `@upstash/vector` test suite will need some tests excluded:
-- Embedding-related tests (we defer `/upsert-data`, `/query-data`)
-- Sparse/hybrid tests (deferred)
-- Any tests that rely on Upstash-specific provisioning APIs
+Coverage intentionally excludes:
+- Embedding-related behavior (`/upsert-data`, `/query-data`)
+- Sparse/hybrid payloads and fusion/query-mode options
+- Resumable queries
+- Upstash-specific provisioning APIs
 
 ### CI Pipeline
 

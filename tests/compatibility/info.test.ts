@@ -31,6 +31,13 @@ describe("SDK: info", () => {
 		expect(info.similarityFunction).toBe("COSINE")
 	})
 
+	test("should expose current dense index metadata fields", async () => {
+		const info = await index.info()
+		expect((info as typeof info & { indexType: string }).indexType).toBe("DENSE")
+		expect(info.denseIndex?.dimension).toBe(384)
+		expect(info.denseIndex?.similarityFunction).toBe("COSINE")
+	})
+
 	test("should return pendingVectorCount as 0", async () => {
 		const info = await index.info()
 		expect(info.pendingVectorCount).toBe(0)

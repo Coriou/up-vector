@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { api, resetAll } from "./setup"
+import { api, BASE_URL, resetAll } from "./setup"
 
 describe("CRUD lifecycle", () => {
 	beforeAll(resetAll)
@@ -252,7 +252,7 @@ describe("CRUD lifecycle", () => {
 		// body to bypass JSON.stringify's null-coercion of non-finite numbers.
 		const TOKEN = process.env.UPVECTOR_TOKEN ?? "test-token-123"
 		const sendRaw = async (raw: string): Promise<number> => {
-			const res = await fetch("http://localhost:8080/upsert", {
+			const res = await fetch(`${BASE_URL}/upsert`, {
 				method: "POST",
 				headers: {
 					Authorization: `Bearer ${TOKEN}`,
@@ -279,5 +279,30 @@ describe("CRUD lifecycle", () => {
 
 		const { status: deleteStatus } = await api("POST", "/delete", { filter: "" })
 		expect(deleteStatus).toBe(400)
+	})
+
+	test("rejects sparse/hybrid payloads instead of silently ignoring sparse fields", async () => {
+		const sparseVector = { indices: [1, 3], values: [0.5, 0.8] }
+
+		const { status: upsertStatus } = await api("POST", "/upsert", {
+			id: "sparse-upsert",
+			vector: [1, 0, 0],
+			sparseVector,
+		})
+		expect(upsertStatus).toBe(400)
+
+		const { status: queryStatus } = await api("POST", "/query", {
+			vector: [1, 0, 0],
+			sparseVector,
+			topK: 1,
+		})
+		expect(queryStatus).toBe(400)
+
+		const { status: updateStatus } = await api("POST", "/update", {
+			id: "sparse-update",
+			vector: [1, 0, 0],
+			sparseVector,
+		})
+		expect(updateStatus).toBe(400)
 	})
 })

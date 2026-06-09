@@ -17,6 +17,7 @@ const MAX_OVER_FETCH = 1000
 const MAX_TOP_K = 1000
 const MAX_VECTOR_DIM = 16384
 const MAX_BATCH_QUERIES = 100
+const UnsupportedField = z.never().optional()
 
 const finiteNumber = z.number().refine((n) => Number.isFinite(n), {
 	message: "Vector values must be finite numbers (no NaN or Infinity)",
@@ -27,10 +28,15 @@ const SingleQuery = z.object({
 		.array(finiteNumber)
 		.min(1, "Vector dimension must be at least 1")
 		.max(MAX_VECTOR_DIM, `Vector dimension must not exceed ${MAX_VECTOR_DIM}`),
+	sparseVector: UnsupportedField,
+	data: UnsupportedField,
 	topK: z.number().int().positive().max(MAX_TOP_K).default(10),
 	includeMetadata: z.boolean().default(false),
 	includeVectors: z.boolean().default(false),
 	includeData: z.boolean().default(false),
+	weightingStrategy: UnsupportedField,
+	fusionAlgorithm: UnsupportedField,
+	queryMode: UnsupportedField,
 	// Empty filter strings used to be silently treated as "no filter", which
 	// hid client bugs (e.g. dynamic filter builders that produce ""). Reject
 	// explicitly so the caller learns about the mistake.
@@ -58,9 +64,9 @@ queryRoutes.post("/query/:namespace?", async (c) => {
 
 	const results = await Promise.all(queries.map((q) => executeQuery(ns, q)))
 
-	if (isBatch) {
-		// SDK expects { result: [[...q1Results], [...q2Results]] } for batch queries.
-		// The SDK's Command.exec() destructures body.result — an array of arrays.
+	if (isBatch && queries.length > 1) {
+		// SDK expects { result: [[...q1Results], [...q2Results]] } for multi-query batches.
+		// The official REST API returns the flat single-query shape for a one-item batch.
 		return c.json({ result: results })
 	}
 	return c.json({ result: results[0] })

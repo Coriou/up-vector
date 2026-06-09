@@ -36,5 +36,10 @@ export type InfoResult = {
 	indexSize: number
 	dimension: number
 	similarityFunction: string
+	indexType: "DENSE"
+	denseIndex: {
+		dimension: number
+		similarityFunction: string
+	}
 	namespaces: Record<string, { vectorCount: number; pendingVectorCount: number }>
 }

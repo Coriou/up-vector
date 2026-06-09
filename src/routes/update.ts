@@ -21,6 +21,7 @@ const idSchema = z
 	.transform(String)
 
 const MAX_VECTOR_DIM = 16384
+const UnsupportedField = z.never().optional()
 
 const UpdateBody = z.object({
 	id: idSchema,
@@ -29,6 +30,7 @@ const UpdateBody = z.object({
 		.min(1, "Vector dimension must be at least 1")
 		.max(MAX_VECTOR_DIM, `Vector dimension must not exceed ${MAX_VECTOR_DIM}`)
 		.optional(),
+	sparseVector: UnsupportedField,
 	metadata: z.record(z.string(), z.unknown()).optional(),
 	data: z.string().optional(),
 	metadataUpdateMode: z.enum(["OVERWRITE", "PATCH"]).default("OVERWRITE"),
@@ -51,6 +53,37 @@ export const updateRoutes = new Hono()
 //
 // Returns 1 if the vector existed and was updated, 0 otherwise.
 const ATOMIC_UPDATE_LUA = `
+local function is_object(value)
+  if type(value) ~= 'table' then
+    return false
+  end
+  for k, _ in pairs(value) do
+    if type(k) ~= 'string' then
+      return false
+    end
+  end
+  return true
+end
+
+local function merge_patch(target, patch)
+  if not is_object(patch) then
+    return patch
+  end
+  if not is_object(target) then
+    target = {}
+  end
+  for k, v in pairs(patch) do
+    if v == cjson.null then
+      target[k] = nil
+    elseif is_object(v) then
+      target[k] = merge_patch(target[k], v)
+    else
+      target[k] = v
+    end
+  end
+  return target
+end
+
 if redis.call('EXISTS', KEYS[1]) == 0 then
   return 0
 end
@@ -66,14 +99,15 @@ if has_pairs then
 end
 if patch_mode == '1' then
   local existing = redis.call('HGET', KEYS[1], 'metadata')
+  local ok_patch, patch = pcall(cjson.decode, patch_json)
   local merged = patch_json
-  if existing then
+  if ok_patch and existing then
     local ok, base = pcall(cjson.decode, existing)
-    if ok and type(base) == 'table' then
-      local patch = cjson.decode(patch_json)
-      for k, v in pairs(patch) do base[k] = v end
-      merged = cjson.encode(base)
+    if ok then
+      merged = cjson.encode(merge_patch(base, patch))
     end
+  elseif ok_patch then
+    merged = cjson.encode(merge_patch({}, patch))
   end
   redis.call('HSET', KEYS[1], 'metadata', merged)
 end

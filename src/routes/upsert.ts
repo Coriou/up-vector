@@ -21,6 +21,7 @@ const idSchema = z
 	.transform(String)
 
 const MAX_VECTOR_DIM = 16384
+const UnsupportedField = z.never().optional()
 
 const VectorSchema = z.object({
 	id: idSchema,
@@ -28,6 +29,7 @@ const VectorSchema = z.object({
 		.array(finiteNumber)
 		.min(1, "Vector dimension must be at least 1")
 		.max(MAX_VECTOR_DIM, `Vector dimension must not exceed ${MAX_VECTOR_DIM}`),
+	sparseVector: UnsupportedField,
 	metadata: z.record(z.string(), z.unknown()).optional(),
 	data: z.string().optional(),
 })

@@ -1,4 +1,4 @@
-const BASE_URL = process.env.UPVECTOR_TEST_URL ?? "http://localhost:8080"
+export const BASE_URL = process.env.UPVECTOR_TEST_URL ?? "http://localhost:8080"
 const TOKEN = process.env.UPVECTOR_TOKEN ?? "test-token-123"
 
 export const AUTH = { Authorization: `Bearer ${TOKEN}` }

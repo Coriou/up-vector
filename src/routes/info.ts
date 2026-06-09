@@ -61,6 +61,11 @@ const handleInfo = async (c: Context) => {
 			indexSize: 0,
 			dimension: detectedDimension,
 			similarityFunction: config.metric,
+			indexType: "DENSE",
+			denseIndex: {
+				dimension: detectedDimension,
+				similarityFunction: config.metric,
+			},
 			namespaces,
 		},
 	})

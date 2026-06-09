@@ -4,9 +4,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Bun](https://img.shields.io/badge/runtime-Bun-f9f1e1?logo=bun)](https://bun.sh)
 
-Self-hosted [Upstash Vector](https://upstash.com/docs/vector/overall/getstarted)-compatible HTTP proxy backed by [Redis Stack](https://redis.io/docs/latest/operate/oss_and_stack/install/install-stack/).
+Self-hosted [Upstash Vector](https://upstash.com/docs/vector/overall/getstarted)-compatible HTTP proxy for dense-vector workloads, backed by [Redis Stack](https://redis.io/docs/latest/operate/oss_and_stack/install/install-stack/).
 
-Drop-in replacement for `@upstash/vector` — point the SDK at your own server instead of Upstash's cloud. Uses Redis Stack (RediSearch) for HNSW vector indexing. Sibling project to [up-redis](https://github.com/Coriou/up-redis) (same idea, but for vectors).
+Drop-in replacement for the dense-vector `@upstash/vector` SDK surface — point the SDK at your own server instead of Upstash's cloud. Uses Redis Stack (RediSearch) for HNSW vector indexing. Sibling project to [up-redis](https://github.com/Coriou/up-redis) (same idea, but for vectors).
 
 ## Quick Start
 
@@ -47,7 +47,7 @@ const results = await index.query({
   filter: "title = 'Hello'",
 })
 
-// All SDK methods work: fetch, delete, update, range, reset, info, namespaces
+// Dense-vector SDK methods work: fetch, delete, update, range, reset, info, namespaces
 ```
 
 ## REST API
@@ -70,22 +70,24 @@ curl -X POST http://localhost:8080/query \
 
 ## API Compatibility
 
-Implements the [Upstash Vector REST API](https://upstash.com/docs/vector/api/endpoints), validated by 198 tests including 65 using the real `@upstash/vector` SDK.
+Implements the dense-vector subset of the [Upstash Vector REST API](https://upstash.com/docs/vector/api/endpoints), validated by 322 tests including 70 using the real `@upstash/vector` SDK.
 
 | Endpoint | Status |
 |----------|--------|
-| `POST /upsert[/{namespace}]` | Supported |
-| `POST /query[/{namespace}]` | Supported (KNN + metadata filtering) |
-| `POST /fetch[/{namespace}]` | Supported (by IDs and prefix) |
-| `POST /delete[/{namespace}]` | Supported (by IDs, prefix, or filter) |
+| `POST /upsert[/{namespace}]` | Supported for dense vectors |
+| `POST /query[/{namespace}]` | Supported for dense vectors (KNN + metadata filtering) |
+| `GET/POST /fetch[/{namespace}]` | Supported (by IDs and prefix) |
+| `DELETE/POST /delete[/{namespace}]` | Supported (by IDs, prefix, or filter) |
 | `POST /update[/{namespace}]` | Supported (OVERWRITE and PATCH modes) |
-| `POST /range[/{namespace}]` | Supported (cursor pagination) |
-| `DELETE /reset[/{namespace}]` | Supported (single or all namespaces) |
-| `GET /info` | Supported |
-| `GET /list-namespaces` | Supported |
-| `DELETE /delete-namespace/{ns}` | Supported |
+| `GET/POST /range[/{namespace}]` | Supported (offset cursor pagination) |
+| `GET/POST /random[/{namespace}]` | Supported |
+| `DELETE/POST /reset[/{namespace}]` | Supported (single or all namespaces) |
+| `GET/POST /info` | Supported (`indexType: "DENSE"`) |
+| `GET/POST /list-namespaces` | Supported |
+| `DELETE/POST /delete-namespace/{ns}` | Supported |
+| `POST /rename-namespace` | Supported |
 
-Not implemented: `/upsert-data`, `/query-data` (require server-side embedding models), `/resumable-query*` (stateful cursors).
+Not implemented: sparse/hybrid vector payloads, `/upsert-data`, `/query-data` (require server-side embedding models), and `/resumable-query*` (stateful cursors).
 
 ### Metadata Filtering
 
@@ -141,6 +143,7 @@ All environment variables are prefixed `UPVECTOR_`:
 | `UPVECTOR_SHUTDOWN_TIMEOUT` | `30000` | Max milliseconds to wait for request drain on shutdown |
 | `UPVECTOR_REQUEST_TIMEOUT` | `30000` | Per-request timeout in milliseconds (`0` = disabled) |
 | `UPVECTOR_METRICS` | `false` | Enable Prometheus metrics at `GET /metrics` |
+| `UPVECTOR_MAX_BODY_SIZE` | `33554432` | Max request body size in bytes |
 
 ## Health & Monitoring
 
@@ -177,7 +180,8 @@ Exposes `http_requests_total{method,status}`, `http_request_duration_seconds` hi
 - **Runtime:** [Bun](https://bun.sh) — native TypeScript, fastest JS runtime
 - **HTTP:** [Hono](https://hono.dev) v4 — lightweight, fast
 - **Redis:** Bun.redis (native, zero-dep) — `send()` for raw `FT.*` RediSearch commands
-- **Validation:** [Zod](https://zod.dev) v3 — request body validation
+- **Validation:** [Zod](https://zod.dev) v4 — request body validation
+- **Lint/format:** [Biome](https://biomejs.dev) v2 — fast formatter and static checks
 
 Key design decisions: lazy index creation on first upsert, dimension auto-detection, namespace isolation via Redis key prefixes, app-level metadata filtering with over-fetch strategy, score normalization to Upstash's 0-1 range.
 
@@ -196,17 +200,19 @@ bun run typecheck        # TypeScript check
 
 ### Testing
 
-198 tests across three tiers:
+322 tests across three tiers:
 
 | Tier | Tests | Purpose |
 |------|-------|---------|
-| **Unit** | 110 | Filter parser, vector encode/decode, score normalization, key naming |
-| **Integration** | 23 | End-to-end against Redis Stack |
-| **SDK Compatibility** | 65 | Real `@upstash/vector` SDK against up-vector |
+| **Unit** | 213 | Filter parser, vector encode/decode, score normalization, key naming, middleware/config hardening |
+| **Integration** | 39 | End-to-end REST behavior against Redis Stack |
+| **SDK Compatibility** | 70 | Real `@upstash/vector` SDK against up-vector |
 
 ```bash
 ./scripts/test-all.sh    # Run everything (starts Redis + server automatically)
 ```
+
+The test script honors `UPVECTOR_REDIS_PORT` and `UPVECTOR_PORT`, and otherwise chooses free local ports before starting Redis/server.
 
 The compatibility tests are the ultimate validation — they use the actual `@upstash/vector` TypeScript SDK, exercising the exact HTTP paths and request formats that production apps use. A weekly CI job also tests against the latest SDK version to catch incompatibilities early.
 

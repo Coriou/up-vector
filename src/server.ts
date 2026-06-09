@@ -11,6 +11,7 @@ import { healthRoutes } from "./routes/health"
 import { infoRoutes } from "./routes/info"
 import { namespaceRoutes } from "./routes/namespaces"
 import { queryRoutes } from "./routes/query"
+import { randomRoutes } from "./routes/random"
 import { rangeRoutes } from "./routes/range"
 import { resetRoutes } from "./routes/reset"
 import { updateRoutes } from "./routes/update"
@@ -63,6 +64,7 @@ app.use("/*", timeoutMiddleware)
 // Authenticated routes
 app.route("/", upsertRoutes)
 app.route("/", queryRoutes)
+app.route("/", randomRoutes)
 app.route("/", fetchRoutes)
 app.route("/", deleteRoutes)
 app.route("/", updateRoutes)

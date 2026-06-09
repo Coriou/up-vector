@@ -36,6 +36,16 @@ describe("upsert + query", () => {
 		expect(results.length).toBe(2)
 	})
 
+	test("single-item batch query returns the flat single-query shape", async () => {
+		const { data } = await api("POST", "/query", [
+			{ vector: [1, 0, 0], topK: 2, includeMetadata: true },
+		])
+		const results = (data as { result: Array<{ id: string }> }).result
+		expect(Array.isArray(results)).toBe(true)
+		expect(Array.isArray(results[0])).toBe(false)
+		expect(results.length).toBe(2)
+	})
+
 	test("includeMetadata flag", async () => {
 		const { data: withMeta } = await api("POST", "/query", {
 			vector: [1, 0, 0],

@@ -2,7 +2,7 @@
 
 ## Development Setup
 
-1. Install [Bun](https://bun.sh) 1.2+
+1. Install [Bun](https://bun.sh) 1.3+
 2. Start Redis Stack: `docker compose -f docker-compose.yml -f docker-compose.dev.yml up redis -d`
 3. `bun install`
 4. `UPVECTOR_TOKEN=test bun run dev`
@@ -22,6 +22,8 @@ Or run everything at once:
 ```bash
 ./scripts/test-all.sh
 ```
+
+The script starts Redis Stack and up-vector automatically. It honors `UPVECTOR_REDIS_PORT` and `UPVECTOR_PORT`; if they are unset, it chooses free local ports starting at `6379` and `8080`.
 
 ## SDK Compatibility Tests
 

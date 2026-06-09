@@ -1,4 +1,4 @@
-import { Hono } from "hono"
+import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { getClient } from "../redis"
 import {
@@ -32,7 +32,7 @@ const FetchBody = z.object({
 
 export const fetchRoutes = new Hono()
 
-fetchRoutes.post("/fetch/:namespace?", async (c) => {
+const handleFetch = async (c: Context) => {
 	const body = await c.req.json()
 	const parsed = FetchBody.parse(body)
 	const ns = c.req.param("namespace") ?? ""
@@ -69,7 +69,10 @@ fetchRoutes.post("/fetch/:namespace?", async (c) => {
 
 	// Neither ids nor prefix
 	return c.json({ result: [] })
-})
+}
+
+fetchRoutes.get("/fetch/:namespace?", handleFetch)
+fetchRoutes.post("/fetch/:namespace?", handleFetch)
 
 function buildVector(
 	hash: Record<string, string>,
