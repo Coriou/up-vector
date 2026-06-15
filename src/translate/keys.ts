@@ -2,6 +2,7 @@ import { ValidationError } from "../errors"
 import { getClient } from "../redis"
 
 export const NS_REGISTRY = "_ns_registry"
+export const EMBEDDING_NS_REGISTRY = "_embedding_ns_registry"
 const MAX_SCAN_ITERATIONS = 10_000
 
 const MAX_NAMESPACE_LENGTH = 256

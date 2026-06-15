@@ -79,6 +79,66 @@ describe("data embedding endpoints", () => {
 		expect(doc.vector.length).toBe(8)
 	})
 
+	test("update re-embeds data for namespaces populated through upsert-data", async () => {
+		await api("POST", "/upsert-data/rag-update", {
+			id: "doc-update",
+			data: "alpha beta",
+		})
+
+		const { data: beforeFetch } = await api("POST", "/fetch/rag-update", {
+			ids: ["doc-update"],
+			includeVectors: true,
+		})
+		const [before] = (beforeFetch as { result: Array<{ vector: number[] }> }).result
+
+		await api("POST", "/update/rag-update", {
+			id: "doc-update",
+			data: "gamma delta",
+		})
+
+		const { data: afterFetch } = await api("POST", "/fetch/rag-update", {
+			ids: ["doc-update"],
+			includeData: true,
+			includeVectors: true,
+		})
+		const [after] = (afterFetch as { result: Array<{ data: string; vector: number[] }> }).result
+
+		expect(after.data).toBe("gamma delta")
+		expect(after.vector).not.toEqual(before.vector)
+
+		await api("DELETE", "/delete-namespace/rag-update")
+	})
+
+	test("reset clears embedding mode so a namespace can be reused for dense vectors", async () => {
+		await api("POST", "/upsert-data/reusable", {
+			id: "text-doc",
+			data: "alpha beta",
+		})
+		await api("POST", "/reset/reusable")
+
+		await api("POST", "/upsert/reusable", {
+			id: "dense-doc",
+			vector: [1, 0],
+		})
+		const { status } = await api("POST", "/update/reusable", {
+			id: "dense-doc",
+			data: "plain dense metadata",
+		})
+
+		expect(status).toBe(200)
+
+		const { data } = await api("POST", "/fetch/reusable", {
+			ids: ["dense-doc"],
+			includeData: true,
+			includeVectors: true,
+		})
+		const [doc] = (data as { result: Array<{ data: string; vector: number[] }> }).result
+		expect(doc.data).toBe("plain dense metadata")
+		expect(doc.vector.length).toBe(2)
+
+		await api("DELETE", "/delete-namespace/reusable")
+	})
+
 	test("upsert-data validates embedding dimension against existing namespace dimension", async () => {
 		await api("POST", "/upsert/upsert-data-dim", { id: "dense", vector: [1, 0] })
 

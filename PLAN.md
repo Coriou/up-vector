@@ -159,7 +159,7 @@ Rationale: Application-level metadata filtering is simpler to implement correctl
 | Upstash Vector | Redis Stack Commands |
 |---|---|
 | **upsert** | `HSET v:{ns}:{id} vec <blob> metadata <json> data <str> id <id>` (+ lazy `FT.CREATE` on first upsert per namespace) |
-| **upsert-data** | Embed raw text with configured provider → same storage path as upsert, with `data` set to the raw text |
+| **upsert-data** | Embed raw text with configured provider → same storage path as upsert, with `data` set to the raw text; marks the namespace as embedding-backed |
 | **query** | `FT.SEARCH idx:{ns} "*=>[KNN {topK * overFetchFactor} @vec $BLOB AS score]" PARAMS 2 BLOB <bytes> SORTBY score LIMIT 0 {topK * overFetchFactor} DIALECT 2` → then app-level metadata filter → trim to topK |
 | **query-data** | Embed raw query text with configured provider → same query path as dense query |
 | **fetch by IDs** | `HGETALL v:{ns}:{id}` per ID (pipelined) |
@@ -167,10 +167,10 @@ Rationale: Application-level metadata filtering is simpler to implement correctl
 | **delete by IDs** | `DEL v:{ns}:{id1} v:{ns}:{id2} ...` |
 | **delete by prefix** | `SCAN` + `DEL` (batched) |
 | **delete by filter** | `FT.SEARCH` (broad) → app-level filter → `DEL` matching keys |
-| **update** | `HSET v:{ns}:{id} [vec <blob>] [metadata <json>] [data <str>]` (partial, only provided fields) |
+| **update** | `HSET v:{ns}:{id} [vec <blob>] [metadata <json>] [data <str>]` (partial, only provided fields); data-only updates re-embed when the namespace was populated through `/upsert-data` |
 | **range** | `SCAN {cursor} MATCH v:{ns}:* COUNT {limit}` → `HGETALL` per key |
-| **reset namespace** | `FT.DROPINDEX idx:{ns}` + `SCAN` + `DEL` all `v:{ns}:*` keys |
-| **reset all** | Drop all `idx:*` indexes + DEL all `v:*` keys |
+| **reset namespace** | `FT.DROPINDEX idx:{ns}` + `SCAN` + `DEL` all `v:{ns}:*` keys; keep namespace registry entries and clear the embedding-backed marker |
+| **reset all** | Drop known `idx:*` indexes + delete known namespace key prefixes; keep namespace registry entries and clear embedding-backed markers |
 | **info** | `FT.INFO idx:{ns}` (per namespace) + `SCARD _ns_registry` |
 | **list-namespaces** | `SMEMBERS _ns_registry` |
 | **delete-namespace** | Drop index + DEL keys + `SREM _ns_registry {ns}` |

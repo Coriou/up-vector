@@ -4,6 +4,7 @@ import { getClient } from "../redis"
 import { dropIndex } from "../translate/index"
 import {
 	deleteKeysByPattern,
+	EMBEDDING_NS_REGISTRY,
 	NS_REGISTRY,
 	validateNamespace,
 	vectorPrefix,
@@ -36,6 +37,9 @@ const handleReset = async (c: Context) => {
 			.filter((idx) => idx.startsWith("idx:"))
 			.map((idx) => idx.slice(4))
 		const dropTargets = Array.from(new Set([...namespaces, ...orphanNamespaces]))
+		if (orphanNamespaces.length > 0) {
+			await redis.sadd(NS_REGISTRY, ...orphanNamespaces)
+		}
 
 		// Drop indexes (best-effort) — failures shouldn't block the rest of the
 		// cleanup. Use allSettled so a missing/half-broken index doesn't abort.
@@ -68,14 +72,18 @@ const handleReset = async (c: Context) => {
 			}
 		}
 
-		// Wipe the registry last so a partial failure leaves the registry as a
-		// pointer to the leftover keys.
-		await redis.del(NS_REGISTRY)
+		// Keep the namespace registry intact: Upstash reset empties namespaces but
+		// does not delete them. The embedding-mode registry is cleared because
+		// up-vector lets a reset namespace be reused either through dense vectors
+		// or /upsert-data; /upsert-data re-marks the namespace when used again.
+		await redis.del(EMBEDDING_NS_REGISTRY)
 	} else {
 		// Reset single namespace
 		await dropIndex(ns)
 		await deleteKeysByPattern(`${vectorPrefix(ns)}*`)
-		await redis.srem(NS_REGISTRY, ns)
+		// Keep the namespace registered if it was known before reset. Resetting an
+		// unknown namespace remains a no-op and does not create a new namespace.
+		await redis.srem(EMBEDDING_NS_REGISTRY, ns)
 	}
 
 	return c.json({ result: "Success" })

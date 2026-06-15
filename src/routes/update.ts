@@ -1,9 +1,11 @@
 import { Hono } from "hono"
 import { z } from "zod"
-import { ValidationError } from "../errors"
+import { config } from "../config"
+import { getEmbeddingProvider } from "../embedding"
+import { EmbeddingProviderError, ValidationError } from "../errors"
 import { getClient } from "../redis"
 import { loadDimension } from "../translate/index"
-import { validateId, validateNamespace, vectorKey } from "../translate/keys"
+import { EMBEDDING_NS_REGISTRY, validateId, validateNamespace, vectorKey } from "../translate/keys"
 import { encodeVector, encodeVectorBase64 } from "../translate/vectors"
 
 const finiteNumber = z.number().refine((n) => Number.isFinite(n), {
@@ -122,15 +124,22 @@ updateRoutes.post("/update/:namespace?", async (c) => {
 	validateId(parsed.id)
 	const redis = getClient()
 	const key = vectorKey(ns, parsed.id)
+	const shouldEmbedData =
+		parsed.vector === undefined &&
+		parsed.data !== undefined &&
+		config.embeddingProvider !== "disabled" &&
+		(await redis.sismember(EMBEDDING_NS_REGISTRY, ns))
+	const vector =
+		parsed.vector ?? (shouldEmbedData ? await embedUpdatedData(parsed.data) : undefined)
 
 	// Validate vector dimension up front (Zod already enforces dim >= 1).
 	// We have to do this *before* the Lua call because the dimension cache lives
 	// in the application — Lua can't reach it.
-	if (parsed.vector) {
+	if (vector) {
 		const existingDim = await loadDimension(ns)
-		if (existingDim !== undefined && parsed.vector.length !== existingDim) {
+		if (existingDim !== undefined && vector.length !== existingDim) {
 			throw new ValidationError(
-				`Dimension mismatch: namespace expects ${existingDim}, got ${parsed.vector.length}`,
+				`Dimension mismatch: namespace expects ${existingDim}, got ${vector.length}`,
 			)
 		}
 	}
@@ -139,9 +148,9 @@ updateRoutes.post("/update/:namespace?", async (c) => {
 	// binary encoder — we cannot use redis.hset() here because Bun.redis
 	// UTF-8-encodes Buffer values, corrupting the binary blob RediSearch indexes.
 	const pairs: (string | Buffer)[] = []
-	if (parsed.vector) {
-		pairs.push("vec", encodeVector(parsed.vector))
-		pairs.push("_vec", encodeVectorBase64(parsed.vector))
+	if (vector) {
+		pairs.push("vec", encodeVector(vector))
+		pairs.push("_vec", encodeVectorBase64(vector))
 	}
 	if (parsed.metadata !== undefined && parsed.metadataUpdateMode !== "PATCH") {
 		pairs.push("metadata", JSON.stringify(parsed.metadata))
@@ -170,3 +179,18 @@ updateRoutes.post("/update/:namespace?", async (c) => {
 	const result = (await redis.send("EVAL", evalArgs as string[])) as number
 	return c.json({ result: { updated: result === 1 ? 1 : 0 } })
 })
+
+async function embedUpdatedData(data: string | undefined): Promise<number[] | undefined> {
+	if (data === undefined) {
+		return undefined
+	}
+
+	const embeddings = await getEmbeddingProvider().embedMany([data])
+	if (embeddings.length !== 1) {
+		throw new EmbeddingProviderError(
+			`Embedding provider returned ${embeddings.length} embeddings for 1 input`,
+			502,
+		)
+	}
+	return embeddings[0]
+}

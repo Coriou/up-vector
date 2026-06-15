@@ -37,6 +37,23 @@ describe("namespaces", () => {
 		expect((data as { result: string[] }).result).not.toContain("prod")
 	})
 
+	test("reset namespace preserves the namespace entry", async () => {
+		await api("POST", "/upsert/reset-preserve", { id: "reset-preserve-id", vector: [1, 0, 0] })
+
+		await api("POST", "/reset/reset-preserve")
+
+		const { data: namespaces } = await api("GET", "/list-namespaces")
+		expect((namespaces as { result: string[] }).result).toContain("reset-preserve")
+
+		const { data: page } = await api("POST", "/range/reset-preserve", {
+			cursor: "0",
+			limit: 10,
+		})
+		expect((page as { result: { vectors: unknown[] } }).result.vectors).toEqual([])
+
+		await api("DELETE", "/delete-namespace/reset-preserve")
+	})
+
 	test("rename namespace moves vectors and registry entry", async () => {
 		await api("POST", "/upsert/old-ns", {
 			id: "renamed-id",
@@ -98,10 +115,33 @@ describe("namespaces", () => {
 		expect(vectors[1]).toBeNull()
 	})
 
-	test("reset all", async () => {
+	test("reset all preserves namespace entries while emptying vectors", async () => {
 		await api("POST", "/upsert", { id: "tmp", vector: [1, 0, 0] })
+		await api("POST", "/upsert/reset-all-a", { id: "tmp-a", vector: [1, 0, 0] })
+		await api("POST", "/upsert/reset-all-b", { id: "tmp-b", vector: [0, 1, 0] })
+
 		await api("POST", "/reset?all=true")
-		const { data } = await api("GET", "/list-namespaces")
-		expect((data as { result: string[] }).result).toEqual([""])
+
+		const { data: namespaces } = await api("GET", "/list-namespaces")
+		const listed = (namespaces as { result: string[] }).result
+		expect(listed).toContain("")
+		expect(listed).toContain("reset-all-a")
+		expect(listed).toContain("reset-all-b")
+
+		const { data: defaultPage } = await api("POST", "/range", { cursor: "0", limit: 10 })
+		const { data: pageA } = await api("POST", "/range/reset-all-a", {
+			cursor: "0",
+			limit: 10,
+		})
+		const { data: pageB } = await api("POST", "/range/reset-all-b", {
+			cursor: "0",
+			limit: 10,
+		})
+		expect((defaultPage as { result: { vectors: unknown[] } }).result.vectors).toEqual([])
+		expect((pageA as { result: { vectors: unknown[] } }).result.vectors).toEqual([])
+		expect((pageB as { result: { vectors: unknown[] } }).result.vectors).toEqual([])
+
+		await api("DELETE", "/delete-namespace/reset-all-a")
+		await api("DELETE", "/delete-namespace/reset-all-b")
 	})
 })

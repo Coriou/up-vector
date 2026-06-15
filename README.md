@@ -136,7 +136,7 @@ curl -X POST http://localhost:8080/query-data \
 
 ## API Compatibility
 
-Implements the dense-vector subset of the [Upstash Vector REST API](https://upstash.com/docs/vector/api/endpoints), plus dense `/upsert-data` and `/query-data` through a configurable embedding provider. Validated by 342 tests including 73 using the real `@upstash/vector` SDK.
+Implements the dense-vector subset of the [Upstash Vector REST API](https://upstash.com/docs/vector/api/endpoints), plus dense `/upsert-data` and `/query-data` through a configurable embedding provider. Validated by 345 tests including 73 using the real `@upstash/vector` SDK.
 
 | Surface | Status | Notes |
 |----------|--------|-------|
@@ -149,7 +149,7 @@ Implements the dense-vector subset of the [Upstash Vector REST API](https://upst
 | `POST /update[/{namespace}]` | Supported | Dense vector, data, OVERWRITE and PATCH metadata |
 | `GET/POST /range[/{namespace}]` | Supported | Offset cursor pagination |
 | `GET/POST /random[/{namespace}]` | Supported | Returns one random dense vector or `null` |
-| `DELETE/POST /reset[/{namespace}]` | Supported | Single namespace or all namespaces |
+| `DELETE/POST /reset[/{namespace}]` | Supported | Single namespace or all namespaces; resets preserve namespace entries |
 | `GET/POST /info` | Supported | Reports `indexType: "DENSE"` and namespace counts |
 | Namespace list/delete/rename | Supported | `list-namespaces`, `delete-namespace`, `rename-namespace` |
 | Sparse indexes and sparse vectors | Unsupported | Requests with `sparseVector` are rejected; see [sparse/hybrid architecture](./docs/architecture/sparse-hybrid.md) |
@@ -282,12 +282,12 @@ bun run typecheck        # TypeScript check
 
 ### Testing
 
-342 tests across three tiers:
+345 tests across three tiers:
 
 | Tier | Tests | Purpose |
 |------|-------|---------|
 | **Unit** | 222 | Filter parser, embedding providers, vector encode/decode, score normalization, key naming, middleware/config hardening |
-| **Integration** | 47 | End-to-end REST behavior against Redis Stack, including raw-text data endpoints |
+| **Integration** | 50 | End-to-end REST behavior against Redis Stack, including raw-text data endpoints |
 | **SDK Compatibility** | 73 | Real `@upstash/vector` SDK against up-vector |
 
 ```bash

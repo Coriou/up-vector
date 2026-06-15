@@ -2,7 +2,8 @@ import { Hono } from "hono"
 import { z } from "zod"
 import { getEmbeddingProvider } from "../embedding"
 import { EmbeddingProviderError } from "../errors"
-import { validateNamespace } from "../translate/keys"
+import { getClient } from "../redis"
+import { EMBEDDING_NS_REGISTRY, validateNamespace } from "../translate/keys"
 import { type DenseQuery, executeQuery } from "./query"
 import { upsertDenseVectors } from "./upsert"
 
@@ -79,6 +80,7 @@ dataRoutes.post("/upsert-data/:namespace?", async (c) => {
 		data: item.data,
 	}))
 	await upsertDenseVectors(ns, vectors)
+	await getClient().sadd(EMBEDDING_NS_REGISTRY, ns)
 
 	return c.json({ result: "Success" })
 })

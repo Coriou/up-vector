@@ -5,6 +5,7 @@ import { getClient } from "../redis"
 import { dropIndex, ensureIndex, loadDimension } from "../translate/index"
 import {
 	deleteKeysByPattern,
+	EMBEDDING_NS_REGISTRY,
 	NS_REGISTRY,
 	parseVectorKey,
 	validateNamespace,
@@ -36,6 +37,7 @@ const handleDeleteNamespace = async (c: Context) => {
 	await dropIndex(ns)
 	await deleteKeysByPattern(`${vectorPrefix(ns)}*`)
 	await redis.srem(NS_REGISTRY, ns)
+	await redis.srem(EMBEDDING_NS_REGISTRY, ns)
 
 	return c.json({ result: "Success" })
 }
@@ -83,6 +85,7 @@ namespaceRoutes.post("/rename-namespace", async (c) => {
 		await dropIndex(parsed.newNamespace)
 		await deleteKeysByPattern(`${vectorPrefix(parsed.newNamespace)}*`)
 		await redis.srem(NS_REGISTRY, parsed.newNamespace)
+		await redis.srem(EMBEDDING_NS_REGISTRY, parsed.newNamespace)
 	}
 
 	const sourceKeys = await scanKeys(`${vectorPrefix(parsed.namespace)}*`)
@@ -99,6 +102,10 @@ namespaceRoutes.post("/rename-namespace", async (c) => {
 
 	await redis.srem(NS_REGISTRY, parsed.namespace)
 	await redis.sadd(NS_REGISTRY, parsed.newNamespace)
+	if (await redis.sismember(EMBEDDING_NS_REGISTRY, parsed.namespace)) {
+		await redis.srem(EMBEDDING_NS_REGISTRY, parsed.namespace)
+		await redis.sadd(EMBEDDING_NS_REGISTRY, parsed.newNamespace)
+	}
 
 	if (sourceDimension !== undefined) {
 		await ensureIndex(parsed.newNamespace, sourceDimension)
