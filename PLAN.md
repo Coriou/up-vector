@@ -48,7 +48,7 @@ Sibling project to [up-redis](https://github.com/Coriou/up-redis) (same idea, bu
 
 | Layer | Choice | Version | Why |
 |-------|--------|---------|-----|
-| Runtime | Bun | 1.3+ | Native TS, fastest JS runtime, built-in test runner |
+| Runtime | Bun | 1.3+ | Native TS, fast runtime, built-in test runner |
 | HTTP | Hono | v4 | Lightweight, fast, great middleware, portable |
 | Redis client | Bun.redis | built-in | Native Bun Redis client with `send()` for raw FT.* commands, zero deps |
 | Validation | Zod | v4 | Request body validation, type inference |
@@ -158,7 +158,7 @@ Rationale: Application-level metadata filtering is simpler to implement correctl
 
 | Upstash Vector | Redis Stack Commands |
 |---|---|
-| **upsert** | `HSET v:{ns}:{id} vec <blob> metadata <json> data <str> id <id>` (+ lazy `FT.CREATE` on first upsert per namespace) |
+| **upsert** | Atomic Lua write: `HSET v:{ns}:{id} id <id> vec <blob> _vec <base64>` plus `HSET`/`HDEL` for optional `metadata` and `data` (+ lazy `FT.CREATE` on first upsert per namespace) |
 | **upsert-data** | Embed raw text with configured provider → same storage path as upsert, with `data` set to the raw text; marks the namespace as embedding-backed |
 | **query** | `FT.SEARCH idx:{ns} "*=>[KNN {topK * overFetchFactor} @vec $BLOB AS score]" PARAMS 2 BLOB <bytes> SORTBY score LIMIT 0 {topK * overFetchFactor} DIALECT 2` → then app-level metadata filter → trim to topK |
 | **query-data** | Embed raw query text with configured provider → same query path as dense query |

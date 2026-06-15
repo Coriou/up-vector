@@ -136,11 +136,11 @@ curl -X POST http://localhost:8080/query-data \
 
 ## API Compatibility
 
-Implements the dense-vector subset of the [Upstash Vector REST API](https://upstash.com/docs/vector/api/endpoints), plus dense `/upsert-data` and `/query-data` through a configurable embedding provider. Validated by 345 tests including 73 using the real `@upstash/vector` SDK.
+Implements the dense-vector subset of the [Upstash Vector REST API](https://upstash.com/docs/vector/api/endpoints), plus dense `/upsert-data` and `/query-data` through a configurable embedding provider. Validated by 346 tests including 74 using the real `@upstash/vector` SDK.
 
 | Surface | Status | Notes |
 |----------|--------|-------|
-| Dense `POST /upsert[/{namespace}]` | Supported | Dense vectors, metadata, optional `data` |
+| Dense `POST /upsert[/{namespace}]` | Supported | Dense vectors, metadata, optional `data`; re-upsert replaces omitted metadata/data |
 | Dense `POST /query[/{namespace}]` | Supported | KNN + metadata filtering; batch query supported |
 | `POST /upsert-data[/{namespace}]` | Supported | Dense only; requires `UPVECTOR_EMBEDDING_PROVIDER`; stores raw text as `data` |
 | `POST /query-data[/{namespace}]` | Supported | Dense only; requires `UPVECTOR_EMBEDDING_PROVIDER`; same result shape as `/query` |
@@ -282,13 +282,13 @@ bun run typecheck        # TypeScript check
 
 ### Testing
 
-345 tests across three tiers:
+346 tests across three tiers:
 
 | Tier | Tests | Purpose |
 |------|-------|---------|
 | **Unit** | 222 | Filter parser, embedding providers, vector encode/decode, score normalization, key naming, middleware/config hardening |
 | **Integration** | 50 | End-to-end REST behavior against Redis Stack, including raw-text data endpoints |
-| **SDK Compatibility** | 73 | Real `@upstash/vector` SDK against up-vector |
+| **SDK Compatibility** | 74 | Real `@upstash/vector` SDK against up-vector |
 
 ```bash
 ./scripts/test-all.sh    # Run everything (starts Redis + server automatically)

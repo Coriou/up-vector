@@ -47,6 +47,25 @@ describe("SDK: upsert", () => {
 		expect((fetched?.metadata as { v: number }).v).toBe(2)
 	})
 
+	test("should clear omitted metadata and data on re-upsert", async () => {
+		const id = randomID()
+		await index.upsert({
+			id,
+			vector: randomVector(),
+			metadata: { stale: true },
+			data: "old payload",
+		})
+
+		await index.upsert({ id, vector: randomVector() })
+
+		const [fetched] = await index.fetch([id], {
+			includeMetadata: true,
+			includeData: true,
+		})
+		expect(fetched?.metadata).toBeUndefined()
+		expect(fetched?.data).toBeUndefined()
+	})
+
 	test("should upsert to namespace", async () => {
 		const ns = index.namespace("upsert-ns")
 		const id = randomID()

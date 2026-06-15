@@ -46,6 +46,27 @@ const UpsertBody = z.union([
 
 export const upsertRoutes = new Hono()
 
+// Upsert is a replacement operation for the vector row. Optional fields that
+// are omitted from a later upsert should not leave stale metadata/data behind.
+const UPSERT_DENSE_LUA = `
+redis.call('HSET', KEYS[1],
+  'id', ARGV[1],
+  'vec', ARGV[2],
+  '_vec', ARGV[3]
+)
+if ARGV[4] == '1' then
+  redis.call('HSET', KEYS[1], 'metadata', ARGV[5])
+else
+  redis.call('HDEL', KEYS[1], 'metadata')
+end
+if ARGV[6] == '1' then
+  redis.call('HSET', KEYS[1], 'data', ARGV[7])
+else
+  redis.call('HDEL', KEYS[1], 'data')
+end
+return 1
+`
+
 upsertRoutes.post("/upsert/:namespace?", async (c) => {
 	const body = await c.req.json()
 	const parsed = UpsertBody.parse(body)
@@ -91,27 +112,25 @@ export async function upsertDenseVectors(ns: string, vectors: DenseVectorInput[]
 	setDetectedDimension(ns, dim)
 
 	// Upsert all vectors (auto-pipelined via Promise.all). The namespace registry
-	// SADD runs alongside the HSETs — both are independent and safe to pipeline.
-	// Must use send("HSET") instead of redis.hset() because hset() UTF-8 encodes
-	// Buffer values, corrupting the binary vec blob that RediSearch needs.
+	// SADD runs alongside the atomic upserts — both are independent and safe to
+	// pipeline. The Lua path is used instead of HSET + HDEL so replacement
+	// semantics do not expose stale metadata/data between commands. It also
+	// preserves the binary vec blob; redis.hset() would UTF-8 encode Buffers.
 	const writes: Promise<unknown>[] = vectors.map((v) => {
 		const key = vectorKey(ns, v.id)
 		const args: (string | Buffer)[] = [
+			UPSERT_DENSE_LUA,
+			"1",
 			key,
-			"id",
 			v.id,
-			"vec",
 			encodeVector(v.vector),
-			"_vec",
 			encodeVectorBase64(v.vector),
+			v.metadata !== undefined ? "1" : "0",
+			v.metadata !== undefined ? JSON.stringify(v.metadata) : "",
+			v.data !== undefined ? "1" : "0",
+			v.data ?? "",
 		]
-		if (v.metadata !== undefined) {
-			args.push("metadata", JSON.stringify(v.metadata))
-		}
-		if (v.data !== undefined) {
-			args.push("data", v.data)
-		}
-		return redis.send("HSET", args as string[])
+		return redis.send("EVAL", args as string[])
 	})
 	writes.push(redis.sadd(NS_REGISTRY, ns))
 	await Promise.all(writes)

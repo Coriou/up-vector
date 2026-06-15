@@ -7,11 +7,11 @@ Sibling project to [up-redis](https://github.com/Coriou/up-redis) (same idea, bu
 
 ## Tech Stack
 
-- **Runtime:** Bun 1.2+ (native TypeScript)
+- **Runtime:** Bun 1.3+ (native TypeScript)
 - **HTTP:** Hono v4
 - **Redis client:** `Bun.redis` (native, zero-dep) — use `.send()` for raw `FT.*` commands
-- **Validation:** Zod v3
-- **Linting/Format:** Biome v1
+- **Validation:** Zod v4
+- **Linting/Format:** Biome v2
 - **Testing:** `bun test` (built-in, Jest-compatible)
 - **Container:** Docker (oven/bun:alpine) + Redis Stack
 
@@ -96,7 +96,10 @@ src/
     health.ts           # GET / + GET /health (with Redis probe)
     metrics.ts          # GET /metrics (Prometheus, opt-in)
     upsert.ts           # POST /upsert[/{ns}]
+    data.ts             # POST /upsert-data[/{ns}], POST /query-data[/{ns}]
     query.ts            # POST /query[/{ns}]
+    unsupported.ts      # Explicit 501 for resumable query endpoints
+    random.ts           # GET|POST /random[/{ns}]
     fetch.ts            # POST /fetch[/{ns}]
     delete.ts           # POST|DELETE /delete[/{ns}]
     update.ts           # POST /update[/{ns}]
@@ -140,9 +143,9 @@ All prefixed `UPVECTOR_`:
 
 ## Implementation Status
 
-Phases 1-6 complete. All CRUD + query + filtering + namespaces + production hardening.
-198 tests passing (110 unit, 23 integration, 65 SDK compatibility).
-Phase 6 added: structured JSON logging, graceful shutdown, health probes, request timeouts, Prometheus metrics.
+Phases 1-6 complete. All dense-vector CRUD + query + filtering + namespaces + production hardening.
+346 tests passing (222 unit, 50 integration, 74 SDK compatibility).
+Production hardening includes structured JSON logging, graceful shutdown, health probes, request timeouts, Prometheus metrics, body limits, and binary vector round-trip protection.
 See `PLAN.md` for the full architecture and phase breakdown.
 
 ## Bun.redis Gotchas
