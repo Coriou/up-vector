@@ -1,7 +1,11 @@
 import { Index } from "@upstash/vector"
 
 export const TOKEN = process.env.UPVECTOR_TOKEN ?? "test-token-123"
-export const URL = process.env.UPVECTOR_URL ?? "http://localhost:8080"
+// Prefer UPVECTOR_TEST_URL so a single env var points the whole test suite
+// (integration + compatibility) at one server; keep UPVECTOR_URL as a fallback
+// for back-compat.
+export const URL =
+	process.env.UPVECTOR_TEST_URL ?? process.env.UPVECTOR_URL ?? "http://localhost:8080"
 
 export function createIndex(): Index {
 	return new Index({ url: URL, token: TOKEN })

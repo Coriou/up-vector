@@ -36,6 +36,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.6
 
       - name: Cache Bun dependencies
         uses: actions/cache@v4
@@ -57,16 +59,29 @@ jobs:
           echo "Testing against @upstash/vector@$VERSION"
 
       - name: Start up-vector
-        run: bun run src/index.ts &
+        run: |
+          bun run src/index.ts > up-vector.log 2>&1 &
+          echo $! > up-vector.pid
 
       - name: Wait for server
         run: |
           for i in $(seq 1 30); do
-            curl -sf http://localhost:8080/ && break || sleep 1
+            if curl -sf http://localhost:8080/health >/dev/null; then
+              echo "up-vector healthy after ${i}s"
+              exit 0
+            fi
+            sleep 1
           done
+          echo "::error::up-vector did not become healthy within 30s"
+          cat up-vector.log || true
+          exit 1
 
       - name: Run compatibility tests
         run: bun test tests/compatibility
+
+      - name: up-vector logs on failure
+        if: failure()
+        run: cat up-vector.log || true
 
       - name: Create issue on failure
         if: failure()
