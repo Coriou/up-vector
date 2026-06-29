@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { normalizeScore } from "../../src/translate/scores"
+import { normalizeScore, toRedisDistanceMetric } from "../../src/translate/scores"
 
 describe("normalizeScore", () => {
 	describe("COSINE", () => {
@@ -35,16 +35,20 @@ describe("normalizeScore", () => {
 	})
 
 	describe("DOT_PRODUCT", () => {
-		test("negative distance (high similarity) -> high score", () => {
-			expect(normalizeScore(-1, "DOT_PRODUCT")).toBe(1)
+		// RediSearch IP distance = 1 - dot_product (verified empirically against
+		// Redis Stack: dot 1 -> 0, dot 0 -> 1, dot -1 -> 2). Upstash's documented
+		// DOT_PRODUCT score is (1 + dot)/2, so given the raw distance the formula
+		// is 1 - dist/2 — identical to COSINE.
+		test("identical unit vectors (dot=1, distance=0) -> score=1", () => {
+			expect(normalizeScore(0, "DOT_PRODUCT")).toBe(1)
 		})
 
-		test("zero distance -> score=0.5", () => {
-			expect(normalizeScore(0, "DOT_PRODUCT")).toBe(0.5)
+		test("orthogonal (dot=0, distance=1) -> score=0.5", () => {
+			expect(normalizeScore(1, "DOT_PRODUCT")).toBe(0.5)
 		})
 
-		test("positive distance (low similarity) -> low score", () => {
-			expect(normalizeScore(1, "DOT_PRODUCT")).toBe(0)
+		test("opposite unit vectors (dot=-1, distance=2) -> score=0", () => {
+			expect(normalizeScore(2, "DOT_PRODUCT")).toBe(0)
 		})
 	})
 
@@ -89,5 +93,22 @@ describe("normalizeScore", () => {
 		test("EUCLIDEAN score clamps to 1 for negative distance", () => {
 			expect(normalizeScore(-1, "EUCLIDEAN")).toBe(1)
 		})
+	})
+})
+
+describe("toRedisDistanceMetric", () => {
+	// RediSearch FT.CREATE only accepts L2 / IP / COSINE for DISTANCE_METRIC.
+	// Passing our Upstash-facing names (EUCLIDEAN / DOT_PRODUCT) verbatim makes
+	// FT.CREATE reject the index, breaking every upsert. Map them explicitly.
+	test("COSINE -> COSINE", () => {
+		expect(toRedisDistanceMetric("COSINE")).toBe("COSINE")
+	})
+
+	test("EUCLIDEAN -> L2", () => {
+		expect(toRedisDistanceMetric("EUCLIDEAN")).toBe("L2")
+	})
+
+	test("DOT_PRODUCT -> IP", () => {
+		expect(toRedisDistanceMetric("DOT_PRODUCT")).toBe("IP")
 	})
 })
