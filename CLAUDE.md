@@ -139,13 +139,22 @@ All prefixed `UPVECTOR_`:
 | `UPVECTOR_LOG_FORMAT` | `json` | No | `json` (structured) or `text` (human-readable) |
 | `UPVECTOR_SHUTDOWN_TIMEOUT` | `30000` | No | Max ms to wait for request drain on shutdown |
 | `UPVECTOR_REQUEST_TIMEOUT` | `30000` | No | Per-request timeout in ms (`0` = disabled) |
+| `UPVECTOR_REDIS_REINIT_AFTER_MS` | `15000` | No | Recreate the Redis client after it is continuously unhealthy this long (self-heal; `0` = disabled) |
 | `UPVECTOR_METRICS` | `false` | No | Enable Prometheus `/metrics` endpoint |
+| `UPVECTOR_MAX_BODY_SIZE` | `33554432` | No | Max request body size in bytes (32 MiB) |
+| `UPVECTOR_EMBEDDING_PROVIDER` | `disabled` | No | `disabled`, `openai`, or `fake` (enables `/upsert-data`, `/query-data`) |
+| `UPVECTOR_EMBEDDING_MODEL` | `text-embedding-3-small` | No | Model for the OpenAI-compatible `/embeddings` endpoint |
+| `UPVECTOR_EMBEDDING_DIMENSION` | provider default | No | Expected embedding dimension |
+| `UPVECTOR_EMBEDDING_BASE_URL` | `https://api.openai.com/v1` | No | OpenAI-compatible API base URL |
+| `UPVECTOR_EMBEDDING_API_KEY` | - | When `openai` | API key, required when provider is `openai` |
+| `UPVECTOR_EMBEDDING_TIMEOUT_MS` | `10000` | No | Per embedding request timeout (`0` = disabled) |
+| `UPVECTOR_EMBEDDING_RETRIES` | `2` | No | Retries for provider timeouts / 429 / 5xx |
 
 ## Implementation Status
 
 Phases 1-6 complete. All dense-vector CRUD + query + filtering + namespaces + production hardening.
-346 tests passing (222 unit, 50 integration, 74 SDK compatibility).
-Production hardening includes structured JSON logging, graceful shutdown, health probes, request timeouts, Prometheus metrics, body limits, and binary vector round-trip protection.
+360 tests passing (230 unit, 56 integration, 74 SDK compatibility).
+Production hardening includes structured JSON logging, graceful shutdown, health probes, request timeouts, Prometheus metrics, body limits, binary vector round-trip protection, Redis client self-heal, and process-level error handlers.
 See `PLAN.md` for the full architecture and phase breakdown.
 
 ## Bun.redis Gotchas

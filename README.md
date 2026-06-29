@@ -211,6 +211,7 @@ All environment variables are prefixed `UPVECTOR_`:
 | `UPVECTOR_LOG_FORMAT` | `json` | Log format: `json` (structured) or `text` (human-readable) |
 | `UPVECTOR_SHUTDOWN_TIMEOUT` | `30000` | Max milliseconds to wait for request drain on shutdown |
 | `UPVECTOR_REQUEST_TIMEOUT` | `30000` | Per-request timeout in milliseconds (`0` = disabled) |
+| `UPVECTOR_REDIS_REINIT_AFTER_MS` | `15000` | Recreate the Redis client after it has been continuously unhealthy this long, so the proxy self-heals in-process once Redis returns (`0` = disabled) |
 | `UPVECTOR_METRICS` | `false` | Enable Prometheus metrics at `GET /metrics` |
 | `UPVECTOR_MAX_BODY_SIZE` | `33554432` | Max request body size in bytes |
 | `UPVECTOR_EMBEDDING_PROVIDER` | `disabled` | `disabled`, `openai`, or `fake`. `fake` is deterministic and intended for tests/dev only |
