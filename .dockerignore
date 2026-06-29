@@ -1,0 +1,26 @@
+# Keep the build context small and prevent local secrets/artifacts from being
+# sent to the Docker daemon. The Dockerfile only COPYs package.json, bun.lock,
+# tsconfig.json and src/, but an explicit denylist guards against a future
+# `COPY . .` ever leaking .env or .git.
+.git
+.github
+.gitignore
+
+node_modules
+dist
+coverage
+
+.env
+.env.local
+*.log
+
+tests
+*.md
+.vscode
+.idea
+.DS_Store
+
+docker-compose*.yml
+.dockerignore
+Dockerfile
+biome.json

@@ -26,9 +26,18 @@ jobs:
     env:
       UPVECTOR_TOKEN: test-token-123
       UPVECTOR_REDIS_URL: redis://localhost:6379
+      # The data-embedding compat tests (tests/compatibility/data.test.ts) exercise
+      # /upsert-data and /query-data, which require a server-side embedding provider.
+      # Use the deterministic "fake" provider so the SDK shape is covered without an
+      # external API key. Must stay in sync with the Test workflow (test.yml).
+      UPVECTOR_EMBEDDING_PROVIDER: fake
+      UPVECTOR_EMBEDDING_MODEL: fake-embedding
+      UPVECTOR_EMBEDDING_DIMENSION: 8
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.6
 
       - name: Cache Bun dependencies
         uses: actions/cache@v4
@@ -50,16 +59,29 @@ jobs:
           echo "Testing against @upstash/vector@$VERSION"
 
       - name: Start up-vector
-        run: bun run src/index.ts &
+        run: |
+          bun run src/index.ts > up-vector.log 2>&1 &
+          echo $! > up-vector.pid
 
       - name: Wait for server
         run: |
           for i in $(seq 1 30); do
-            curl -sf http://localhost:8080/ && break || sleep 1
+            if curl -sf http://localhost:8080/health >/dev/null; then
+              echo "up-vector healthy after ${i}s"
+              exit 0
+            fi
+            sleep 1
           done
+          echo "::error::up-vector did not become healthy within 30s"
+          cat up-vector.log || true
+          exit 1
 
       - name: Run compatibility tests
         run: bun test tests/compatibility
+
+      - name: up-vector logs on failure
+        if: failure()
+        run: cat up-vector.log || true
 
       - name: Create issue on failure
         if: failure()
@@ -70,8 +92,15 @@ jobs:
           TITLE="SDK Compat: @upstash/vector@${VERSION} test failures"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          # Check for existing open issue with same title
-          EXISTING=$(gh issue list --search "$TITLE" --state open --limit 1 --json number --jq '.[0].number // empty')
+          # Ensure the labels exist — gh issue create fails outright if a label is
+          # unknown, which would silently swallow the whole notification. Idempotent.
+          gh label create sdk-compat --color FBCA04 --description "Upstash SDK compatibility" 2>/dev/null || true
+          gh label create automated --color EDEDED --description "Opened by automation" 2>/dev/null || true
+
+          # Skip if an open issue with this exact title already exists (filter by
+          # label, exact-match the title — more reliable than free-text search).
+          EXISTING=$(gh issue list --state open --label sdk-compat --json number,title \
+            --jq ".[] | select(.title == \"$TITLE\") | .number" | head -1)
           if [ -n "$EXISTING" ]; then
             echo "Issue #$EXISTING already open for this version, skipping"
             exit 0

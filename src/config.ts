@@ -25,6 +25,12 @@ const envSchema = z
 		UPVECTOR_LOG_FORMAT: z.enum(["json", "text"]).default("json"),
 		UPVECTOR_SHUTDOWN_TIMEOUT: z.coerce.number().int().nonnegative().default(30000),
 		UPVECTOR_REQUEST_TIMEOUT: z.coerce.number().int().nonnegative().default(30000),
+		// Bun's RedisClient gives up permanently once its reconnect attempts are
+		// exhausted and never recovers, even after Redis returns. A watchdog
+		// recreates the client once Redis has been continuously unhealthy for this
+		// many ms (0 disables). The default gives Bun's own autoReconnect a chance
+		// first, then self-heals in-process.
+		UPVECTOR_REDIS_REINIT_AFTER_MS: z.coerce.number().int().nonnegative().default(15000),
 		UPVECTOR_METRICS: z.enum(["true", "false"]).default("false"),
 		// 32 MiB default — covers a max upsert batch (1000 vectors × 1536 dims as JSON
 		// is ~23 MB) with headroom for metadata.
@@ -75,6 +81,7 @@ export const config = {
 	logFormat: parsed.UPVECTOR_LOG_FORMAT,
 	shutdownTimeout: parsed.UPVECTOR_SHUTDOWN_TIMEOUT,
 	requestTimeout: parsed.UPVECTOR_REQUEST_TIMEOUT,
+	redisReinitAfterMs: parsed.UPVECTOR_REDIS_REINIT_AFTER_MS,
 	metricsEnabled: parsed.UPVECTOR_METRICS === "true",
 	maxBodySize: parsed.UPVECTOR_MAX_BODY_SIZE,
 	embeddingProvider: parsed.UPVECTOR_EMBEDDING_PROVIDER,

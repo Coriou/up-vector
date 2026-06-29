@@ -3,6 +3,7 @@ import { ValidationError } from "../errors"
 import { log } from "../logger"
 import { getClient } from "../redis"
 import { indexName, NS_REGISTRY } from "./keys"
+import { toRedisDistanceMetric } from "./scores"
 
 const knownIndexes = new Set<string>()
 const dimensionMap = new Map<string, number>()
@@ -96,7 +97,7 @@ async function createIndexInternal(ns: string, dimension: number, idx: string): 
 			"DIM",
 			String(dimension),
 			"DISTANCE_METRIC",
-			config.metric,
+			toRedisDistanceMetric(config.metric),
 		])
 	} catch (err: unknown) {
 		const msg = err instanceof Error ? err.message : String(err)

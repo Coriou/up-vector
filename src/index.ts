@@ -1,6 +1,6 @@
 import { config } from "./config"
 import { log } from "./logger"
-import { closeRedis, initRedis } from "./redis"
+import { closeRedis, initRedis, isRedisHealthy, reinitRedis } from "./redis"
 import { app } from "./server"
 import { setShuttingDown } from "./shutdown"
 import { syncIndexes } from "./translate/index"
@@ -75,6 +75,67 @@ async function main(): Promise<void> {
 
 	process.on("SIGTERM", () => shutdown("SIGTERM"))
 	process.on("SIGINT", () => shutdown("SIGINT"))
+
+	// A stray rejection elsewhere must not vanish silently. Log loudly but stay
+	// up — a single bad request shouldn't take down the service. (The timeout
+	// path's late rejection is already absorbed by Promise.race.)
+	process.on("unhandledRejection", (reason) => {
+		const msg = reason instanceof Error ? reason.message : String(reason)
+		const stack = reason instanceof Error ? reason.stack : undefined
+		log.error("unhandled promise rejection", { error: msg, stack })
+	})
+
+	// After an uncaught exception the process is in an undefined state; log and
+	// exit rather than resume. A supervisor (restart: unless-stopped) brings up a
+	// clean instance.
+	process.on("uncaughtException", (err) => {
+		log.error("uncaught exception, exiting", { error: err.message, stack: err.stack })
+		setShuttingDown()
+		process.exit(1)
+	})
+
+	// Redis self-heal watchdog: Bun's client never recovers once its reconnect
+	// attempts are exhausted, leaving the proxy serving 5xx forever even after
+	// Redis returns. Recreate the client once Redis has been continuously
+	// unhealthy past the configured threshold.
+	if (config.redisReinitAfterMs > 0) {
+		let unhealthySince: number | null = null
+		let busy = false
+		const intervalMs = Math.min(5000, config.redisReinitAfterMs)
+		const watchdog = setInterval(async () => {
+			if (busy) return
+			busy = true
+			try {
+				if (await isRedisHealthy()) {
+					unhealthySince = null
+					return
+				}
+				const now = Date.now()
+				if (unhealthySince === null) {
+					unhealthySince = now
+					return
+				}
+				if (now - unhealthySince >= config.redisReinitAfterMs) {
+					log.warn("redis unhealthy past threshold, recreating client", {
+						unhealthy_ms: now - unhealthySince,
+					})
+					try {
+						await reinitRedis()
+						log.info("redis client reinitialized after outage")
+						unhealthySince = null
+					} catch (err: unknown) {
+						const msg = err instanceof Error ? err.message : String(err)
+						log.error("redis reinit failed, will retry", { error: msg })
+						unhealthySince = now
+					}
+				}
+			} finally {
+				busy = false
+			}
+		}, intervalMs)
+		// Don't let the watchdog keep the event loop alive on its own.
+		watchdog.unref()
+	}
 }
 
 main().catch((err) => {
