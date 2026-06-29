@@ -71,6 +71,28 @@ export async function isRedisHealthy(): Promise<boolean> {
 	return lastPingOk
 }
 
+/**
+ * Recreate the Redis client after a terminal disconnect. Bun's RedisClient gives
+ * up permanently once its reconnect attempts are exhausted ("Max reconnection
+ * attempts reached") and never recovers on its own — verified against Redis
+ * Stack: after a brief outage the old client stays wedged even once Redis is
+ * back. A fresh client reconnects cleanly, so the watchdog calls this to
+ * self-heal in-process. Throws if the new client can't reach Redis yet (caller
+ * retries on the next tick).
+ */
+export async function reinitRedis(): Promise<void> {
+	const old = client
+	client = null
+	if (old) {
+		try {
+			old.close()
+		} catch {
+			// Best-effort: the old client is already broken.
+		}
+	}
+	await initRedis()
+}
+
 export async function closeRedis(): Promise<void> {
 	if (client) {
 		client.close()
