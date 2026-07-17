@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 import { errorHandler } from "../../src/middleware/error-handler"
-import {
-	assertMetricsAuthorized,
-	metricsAuthorizationOk,
-} from "../../src/routes/metrics"
+import { assertMetricsAuthorized, metricsAuthorizationOk } from "../../src/routes/metrics"
 
 describe("metricsAuthorizationOk", () => {
 	test("allows all requests when token is unset", () => {
@@ -14,9 +11,7 @@ describe("metricsAuthorizationOk", () => {
 	})
 
 	test("requires exact Bearer token when configured", () => {
-		expect(metricsAuthorizationOk("Bearer scrape-secret", "scrape-secret")).toBe(
-			true,
-		)
+		expect(metricsAuthorizationOk("Bearer scrape-secret", "scrape-secret")).toBe(true)
 		expect(metricsAuthorizationOk("Bearer wrong", "scrape-secret")).toBe(false)
 		expect(metricsAuthorizationOk(undefined, "scrape-secret")).toBe(false)
 		expect(metricsAuthorizationOk("scrape-secret", "scrape-secret")).toBe(false)

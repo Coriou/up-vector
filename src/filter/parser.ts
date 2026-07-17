@@ -51,9 +51,7 @@ export function parse(tokens: Token[]): FilterNode {
 			advance() // skip comma
 			values.push(parseValue())
 			if (values.length > MAX_IN_LIST_VALUES) {
-				throw new ValidationError(
-					`IN list must not exceed ${MAX_IN_LIST_VALUES} values`,
-				)
+				throw new ValidationError(`IN list must not exceed ${MAX_IN_LIST_VALUES} values`)
 			}
 		}
 		expect("RPAREN")

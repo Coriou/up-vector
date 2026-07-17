@@ -116,8 +116,7 @@ describe("OpenAICompatibleEmbeddingProvider", () => {
 		const provider = new OpenAICompatibleEmbeddingProvider({
 			apiKey: "test-key",
 			retries: 0,
-			fetchFn: async () =>
-				Response.json({ error: { message: sensitive } }, { status: 429 }),
+			fetchFn: async () => Response.json({ error: { message: sensitive } }, { status: 429 }),
 		})
 
 		try {
