@@ -136,7 +136,7 @@ curl -X POST http://localhost:8080/query-data \
 
 ## API Compatibility
 
-Implements the dense-vector subset of the [Upstash Vector REST API](https://upstash.com/docs/vector/api/endpoints), plus dense `/upsert-data` and `/query-data` through a configurable embedding provider. Validated by 346 tests including 74 using the real `@upstash/vector` SDK.
+Implements the dense-vector subset of the [Upstash Vector REST API](https://upstash.com/docs/vector/api/endpoints), plus dense `/upsert-data` and `/query-data` through a configurable embedding provider. Validated by 372 tests including 74 using the real `@upstash/vector` SDK.
 
 | Surface | Status | Notes |
 |----------|--------|-------|
@@ -213,6 +213,7 @@ All environment variables are prefixed `UPVECTOR_`:
 | `UPVECTOR_REQUEST_TIMEOUT` | `30000` | Per-request timeout in milliseconds (`0` = disabled) |
 | `UPVECTOR_REDIS_REINIT_AFTER_MS` | `15000` | Recreate the Redis client after it has been continuously unhealthy this long, so the proxy self-heals in-process once Redis returns (`0` = disabled) |
 | `UPVECTOR_METRICS` | `false` | Enable Prometheus metrics at `GET /metrics` |
+| `UPVECTOR_METRICS_TOKEN` | — | Optional. When set (and metrics enabled), `GET /metrics` requires `Authorization: Bearer <token>`. When unset, `/metrics` is unauthenticated (Prometheus-friendly). Prefer network policy or this token if the port is public. |
 | `UPVECTOR_MAX_BODY_SIZE` | `33554432` | Max request body size in bytes |
 | `UPVECTOR_EMBEDDING_PROVIDER` | `disabled` | `disabled`, `openai`, or `fake`. `fake` is deterministic and intended for tests/dev only |
 | `UPVECTOR_EMBEDDING_MODEL` | `text-embedding-3-small` | Model name sent to the OpenAI-compatible `/embeddings` endpoint |
@@ -244,11 +245,17 @@ curl http://localhost:8080/health
 # → {"status":"shutting_down","redis":"..."} (503)
 ```
 
-**Prometheus metrics** — enable with `UPVECTOR_METRICS=true`:
+**Prometheus metrics** — enable with `UPVECTOR_METRICS=true` (disabled by default):
 
 ```bash
+# Unauthenticated when UPVECTOR_METRICS_TOKEN is unset
 curl http://localhost:8080/metrics
+
+# When UPVECTOR_METRICS_TOKEN=scrape-secret
+curl -H "Authorization: Bearer scrape-secret" http://localhost:8080/metrics
 ```
+
+Enabling metrics without a scrape network or token exposes request-volume counters if the listen port is public.
 
 Exposes `http_requests_total{method,status}`, `http_request_duration_seconds` histogram, and `upvector_info` gauge in Prometheus exposition format.
 
@@ -283,12 +290,12 @@ bun run typecheck        # TypeScript check
 
 ### Testing
 
-346 tests across three tiers:
+372 tests across three tiers:
 
 | Tier | Tests | Purpose |
 |------|-------|---------|
-| **Unit** | 222 | Filter parser, embedding providers, vector encode/decode, score normalization, key naming, middleware/config hardening |
-| **Integration** | 50 | End-to-end REST behavior against Redis Stack, including raw-text data endpoints |
+| **Unit** | 238 | Filter parser, embedding providers, vector encode/decode, score normalization, key naming, middleware/config hardening |
+| **Integration** | 60 | End-to-end REST behavior against Redis Stack, including raw-text data endpoints |
 | **SDK Compatibility** | 74 | Real `@upstash/vector` SDK against up-vector |
 
 ```bash

@@ -141,6 +141,7 @@ All prefixed `UPVECTOR_`:
 | `UPVECTOR_REQUEST_TIMEOUT` | `30000` | No | Per-request timeout in ms (`0` = disabled) |
 | `UPVECTOR_REDIS_REINIT_AFTER_MS` | `15000` | No | Recreate the Redis client after it is continuously unhealthy this long (self-heal; `0` = disabled) |
 | `UPVECTOR_METRICS` | `false` | No | Enable Prometheus `/metrics` endpoint |
+| `UPVECTOR_METRICS_TOKEN` | - | No | Optional Bearer for `GET /metrics` when metrics enabled; when unset, `/metrics` is unauthenticated |
 | `UPVECTOR_MAX_BODY_SIZE` | `33554432` | No | Max request body size in bytes (32 MiB) |
 | `UPVECTOR_EMBEDDING_PROVIDER` | `disabled` | No | `disabled`, `openai`, or `fake` (enables `/upsert-data`, `/query-data`) |
 | `UPVECTOR_EMBEDDING_MODEL` | `text-embedding-3-small` | No | Model for the OpenAI-compatible `/embeddings` endpoint |
@@ -152,9 +153,9 @@ All prefixed `UPVECTOR_`:
 
 ## Implementation Status
 
-Phases 1-6 complete. All dense-vector CRUD + query + filtering + namespaces + production hardening.
-360 tests passing (230 unit, 56 integration, 74 SDK compatibility).
-Production hardening includes structured JSON logging, graceful shutdown, health probes, request timeouts, Prometheus metrics, body limits, binary vector round-trip protection, Redis client self-heal, and process-level error handlers.
+Phases 1-6 complete. Dense-vector CRUD + query + filtering + namespaces + production hardening + provider-backed `/upsert-data`/`/query-data`.
+372 tests passing (238 unit, 60 integration, 74 SDK compatibility).
+Production hardening includes structured JSON logging, graceful shutdown, health probes, request timeouts, Prometheus metrics (optional scrape token), body limits, binary vector round-trip protection, Redis client self-heal, and process-level error handlers.
 See `PLAN.md` for the full architecture and phase breakdown.
 
 ## Bun.redis Gotchas

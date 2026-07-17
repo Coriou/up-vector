@@ -1,4 +1,5 @@
 import { type Context, Hono } from "hono"
+import { z } from "zod"
 import { getClient } from "../redis"
 import { parseVectorKey, validateNamespace, vectorPrefix } from "../translate/keys"
 import { decodeVectorBase64 } from "../translate/vectors"
@@ -6,9 +7,62 @@ import type { Vector } from "../types"
 
 const MAX_SCAN_ITERATIONS = 10_000
 
+const RandomBody = z.object({
+	includeMetadata: z.boolean().default(false),
+	includeVectors: z.boolean().default(true),
+	includeData: z.boolean().default(false),
+})
+
 export const randomRoutes = new Hono()
 
+function parseBoolParam(raw: string | undefined, defaultValue: boolean): boolean {
+	if (raw === undefined) return defaultValue
+	if (raw === "true" || raw === "1") return true
+	if (raw === "false" || raw === "0") return false
+	return defaultValue
+}
+
+async function parseRandomOptions(c: Context): Promise<z.infer<typeof RandomBody>> {
+	if (c.req.method === "GET") {
+		return {
+			includeMetadata: parseBoolParam(c.req.query("includeMetadata"), false),
+			includeVectors: parseBoolParam(c.req.query("includeVectors"), true),
+			includeData: parseBoolParam(c.req.query("includeData"), false),
+		}
+	}
+
+	// POST: empty body → defaults; non-empty invalid JSON → SyntaxError → 400 via errorHandler
+	const text = await c.req.text()
+	if (!text.trim()) {
+		return RandomBody.parse({})
+	}
+	return RandomBody.parse(JSON.parse(text))
+}
+
+function buildRandomVector(
+	hash: Record<string, string>,
+	id: string,
+	opts: z.infer<typeof RandomBody>,
+): Vector {
+	const vec: Vector = { id }
+	if (opts.includeVectors && hash._vec) {
+		vec.vector = decodeVectorBase64(hash._vec)
+	}
+	if (opts.includeMetadata && hash.metadata) {
+		try {
+			vec.metadata = JSON.parse(hash.metadata)
+		} catch {
+			// Malformed metadata JSON — skip
+		}
+	}
+	if (opts.includeData && hash.data !== undefined) {
+		vec.data = hash.data
+	}
+	return vec
+}
+
 const handleRandom = async (c: Context) => {
+	const opts = await parseRandomOptions(c)
 	const ns = c.req.param("namespace") ?? ""
 	validateNamespace(ns)
 	const redis = getClient()
@@ -41,17 +95,19 @@ const handleRandom = async (c: Context) => {
 	}
 
 	const hash = await redis.hgetall(selectedKey)
-	if (!hash?._vec) {
+	if (!hash || Object.keys(hash).length === 0) {
+		return c.json({ result: null })
+	}
+
+	// Need at least one stored field; empty hash already handled. If vectors
+	// are omitted by flag, still return id (+ optional metadata/data).
+	if (!hash._vec && !hash.metadata && hash.data === undefined) {
 		return c.json({ result: null })
 	}
 
 	const parsedKey = parseVectorKey(selectedKey)
-	const vector: Vector = {
-		id: parsedKey?.id ?? hash.id ?? selectedKey,
-		vector: decodeVectorBase64(hash._vec),
-	}
-
-	return c.json({ result: vector })
+	const id = parsedKey?.id ?? hash.id ?? selectedKey
+	return c.json({ result: buildRandomVector(hash, id, opts) })
 }
 
 randomRoutes.get("/random/:namespace?", handleRandom)

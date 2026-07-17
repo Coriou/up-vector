@@ -196,6 +196,30 @@ describe("parser", () => {
 		})
 	})
 
+	test("rejects IN lists larger than 256 values", () => {
+		const values = Array.from({ length: 257 }, (_, i) => `'v${i}'`).join(", ")
+		expect(() => parse(tokenize(`tag IN (${values})`))).toThrow(ValidationError)
+		expect(() => parse(tokenize(`tag IN (${values})`))).toThrow(
+			"IN list must not exceed 256 values",
+		)
+	})
+
+	test("accepts IN lists with exactly 256 values", () => {
+		const values = Array.from({ length: 256 }, (_, i) => `'v${i}'`).join(", ")
+		const ast = parse(tokenize(`tag IN (${values})`))
+		expect(ast.type).toBe("in")
+		if (ast.type === "in") {
+			expect(ast.values.length).toBe(256)
+		}
+	})
+
+	test("rejects NOT IN lists larger than 256 values", () => {
+		const values = Array.from({ length: 257 }, (_, i) => i).join(", ")
+		expect(() => parse(tokenize(`n NOT IN (${values})`))).toThrow(
+			"IN list must not exceed 256 values",
+		)
+	})
+
 	test("CONTAINS", () => {
 		const ast = parse(tokenize("tags CONTAINS 'featured'"))
 		expect(ast).toEqual({

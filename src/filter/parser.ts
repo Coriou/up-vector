@@ -2,6 +2,7 @@ import { ValidationError } from "../errors"
 import type { FilterNode, Token, Value } from "./types"
 
 const MAX_DEPTH = 100
+const MAX_IN_LIST_VALUES = 256
 
 export function parse(tokens: Token[]): FilterNode {
 	let pos = 0
@@ -49,6 +50,9 @@ export function parse(tokens: Token[]): FilterNode {
 		while (peek().type === "COMMA") {
 			advance() // skip comma
 			values.push(parseValue())
+			if (values.length > MAX_IN_LIST_VALUES) {
+				throw new ValidationError(`IN list must not exceed ${MAX_IN_LIST_VALUES} values`)
+			}
 		}
 		expect("RPAREN")
 		return values

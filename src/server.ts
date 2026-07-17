@@ -39,7 +39,7 @@ app.use(loggerMiddleware)
 // Health check BEFORE auth (no token needed)
 app.route("/", healthRoutes)
 
-// Metrics endpoint (before auth, unauthenticated for Prometheus scraping)
+// Metrics endpoint (before app auth). Unauthenticated unless UPVECTOR_METRICS_TOKEN is set.
 if (config.metricsEnabled) {
 	const { metricsRoutes } = await import("./routes/metrics")
 	app.route("/", metricsRoutes)

@@ -76,7 +76,7 @@ describe("SDK: update", () => {
 		await ns.upsert({ id, vector: randomVector(), metadata: { v: 1 } })
 		await ns.update({ id, metadata: { v: 2 } })
 		const [fetched] = await ns.fetch([id], { includeMetadata: true })
-		expect((fetched?.metadata as { v: number }).v).toBe(2)
+		expect(fetched?.metadata).toEqual({ v: 2 })
 		await ns.reset()
 	})
 
