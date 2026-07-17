@@ -1,5 +1,6 @@
 import { config } from "./config"
 import { EmbeddingProviderError, ValidationError } from "./errors"
+import { log } from "./logger"
 
 export type EmbeddingProvider = {
 	readonly name: string
@@ -122,8 +123,14 @@ export class OpenAICompatibleEmbeddingProvider implements EmbeddingProvider {
 				}
 
 				const message = await readProviderError(response)
+				if (message) {
+					log.warn("embedding provider error", {
+						status: response.status,
+						providerMessage: message,
+					})
+				}
 				throw new EmbeddingProviderError(
-					`Embedding provider failed with HTTP ${response.status}${message ? `: ${message}` : ""}`,
+					`Embedding provider failed with HTTP ${response.status}`,
 					502,
 				)
 			} catch (err) {

@@ -106,6 +106,33 @@ describe("OpenAICompatibleEmbeddingProvider", () => {
 			expect(err).toBeInstanceOf(EmbeddingProviderError)
 			expect((err as EmbeddingProviderError).status).toBe(502)
 			expect((err as Error).message).toContain("HTTP 401")
+			expect((err as Error).message).not.toContain("bad key")
+			expect((err as Error).message).toBe("Embedding provider failed with HTTP 401")
+		}
+	})
+
+	test("does not echo sensitive upstream error text to clients", async () => {
+		const sensitive = "billing: account sk-secret-abc model text-embedding-3-large quota"
+		const provider = new OpenAICompatibleEmbeddingProvider({
+			apiKey: "test-key",
+			retries: 0,
+			fetchFn: async () =>
+				Response.json({ error: { message: sensitive } }, { status: 429 }),
+		})
+
+		try {
+			await provider.embedMany(["hello"])
+			throw new Error("expected provider to fail")
+		} catch (err) {
+			expect(err).toBeInstanceOf(EmbeddingProviderError)
+			expect((err as EmbeddingProviderError).status).toBe(502)
+			const message = (err as Error).message
+			expect(message).toContain("HTTP 429")
+			expect(message).not.toContain("sk-secret-abc")
+			expect(message).not.toContain("billing")
+			expect(message).not.toContain(sensitive)
+			// Generic class message only — no ": <upstream>" suffix
+			expect(message).toBe("Embedding provider failed with HTTP 429")
 		}
 	})
 
