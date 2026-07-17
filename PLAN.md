@@ -427,12 +427,14 @@ Like up-redis's file mode, support a JSON config mapping tokens to separate Redi
 
 ### Phase 7 — Deferred (only if needed)
 
-- [ ] `/upsert-data` + `/query-data` (server-side embedding via local model)
+- [x] `/upsert-data` + `/query-data` (provider-backed: `openai` / `fake` / `disabled`; not Upstash-hosted model catalog)
 - [ ] Sparse vector support
 - [ ] Hybrid search with fusion algorithms
 - [ ] Resumable queries (stateful cursors)
 - [ ] Multi-token / multi-index mode (up-redis file-mode equivalent)
 - [ ] RedisJSON-based metadata indexing (v2 filter upgrade)
+- [ ] `/range` real SCAN-cursor pagination (known O(N)/OOM risk today; offset-style API preserved)
+- [ ] Metadata filter pushdown into RediSearch (v1 over-fetch + JS filter remains)
 
 ---
 

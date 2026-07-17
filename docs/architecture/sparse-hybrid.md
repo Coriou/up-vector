@@ -1,6 +1,6 @@
 # Sparse and Hybrid Architecture
 
-Status: roadmap, not implemented.
+Status: roadmap, not implemented. Still deferred as of 2026-07-17 (maintenance pass; no sparse/hybrid implementation).
 
 up-vector is currently reliable for dense vectors and dense raw-text RAG via `/upsert-data` and `/query-data`. Sparse and hybrid support should not be added by simply accepting `sparseVector` fields; it needs a storage and scoring model that can be tested against Upstash semantics.
 
