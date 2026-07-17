@@ -32,6 +32,10 @@ const envSchema = z
 		// first, then self-heals in-process.
 		UPVECTOR_REDIS_REINIT_AFTER_MS: z.coerce.number().int().nonnegative().default(15000),
 		UPVECTOR_METRICS: z.enum(["true", "false"]).default("false"),
+		// Optional scrape token for GET /metrics. When set, Prometheus (or any scraper)
+		// must send Authorization: Bearer <token>. When unset, /metrics stays open
+		// (only reachable if UPVECTOR_METRICS=true).
+		UPVECTOR_METRICS_TOKEN: z.string().min(1).optional(),
 		// 32 MiB default — covers a max upsert batch (1000 vectors × 1536 dims as JSON
 		// is ~23 MB) with headroom for metadata.
 		UPVECTOR_MAX_BODY_SIZE: z.coerce
@@ -83,6 +87,7 @@ export const config = {
 	requestTimeout: parsed.UPVECTOR_REQUEST_TIMEOUT,
 	redisReinitAfterMs: parsed.UPVECTOR_REDIS_REINIT_AFTER_MS,
 	metricsEnabled: parsed.UPVECTOR_METRICS === "true",
+	metricsToken: parsed.UPVECTOR_METRICS_TOKEN as string | undefined,
 	maxBodySize: parsed.UPVECTOR_MAX_BODY_SIZE,
 	embeddingProvider: parsed.UPVECTOR_EMBEDDING_PROVIDER,
 	embeddingModel: parsed.UPVECTOR_EMBEDDING_MODEL,
