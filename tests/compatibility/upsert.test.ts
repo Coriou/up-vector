@@ -44,7 +44,7 @@ describe("SDK: upsert", () => {
 		await index.upsert({ id, vector: randomVector(), metadata: { v: 1 } })
 		await index.upsert({ id, vector: randomVector(), metadata: { v: 2 } })
 		const [fetched] = await index.fetch([id], { includeMetadata: true })
-		expect((fetched?.metadata as { v: number }).v).toBe(2)
+		expect(fetched?.metadata).toEqual({ v: 2 })
 	})
 
 	test("should clear omitted metadata and data on re-upsert", async () => {
