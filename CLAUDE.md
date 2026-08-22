@@ -13,7 +13,7 @@ Sibling project to [up-redis](https://github.com/Coriou/up-redis) (same idea, bu
 - **Validation:** Zod v4
 - **Linting/Format:** Biome v2
 - **Testing:** `bun test` (built-in, Jest-compatible)
-- **Container:** Docker (oven/bun:alpine) + Redis Stack
+- **Container:** Docker (oven/bun:1.3-alpine) + Redis Stack (pinned `7.4.0-v8`)
 
 **Not a Next.js/Vercel project.** Pure backend service.
 

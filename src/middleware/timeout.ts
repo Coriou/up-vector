@@ -25,20 +25,20 @@ export const timeoutMiddleware: MiddlewareHandler = async (c, next) => {
 			throw err
 		})
 
-	// If the timeout wins the race we respond 504 while `work` is still
-	// pending. Attach an observer so a late rejection is logged instead of
-	// surfacing as an unhandledRejection at process level.
-	work.catch((err) => {
-		log.warn("late failure after request timeout", {
-			method: c.req.method,
-			path: c.req.path,
-			error: err instanceof Error ? err.message : String(err),
-		})
-	})
-
 	const result = await Promise.race([work, timeoutPromise])
 
 	if (result === TIMEOUT_SENTINEL) {
+		// The race settled on the timeout while `work` was still pending.
+		// Observe the loser now — attaching earlier would also catch errors
+		// that propagate normally through the race and mislabel every fast
+		// handler failure as a "late failure".
+		work.catch((err) => {
+			log.warn("late failure after request timeout", {
+				method: c.req.method,
+				path: c.req.path,
+				error: err instanceof Error ? err.message : String(err),
+			})
+		})
 		log.warn("request timeout", {
 			method: c.req.method,
 			path: c.req.path,

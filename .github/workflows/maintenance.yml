@@ -141,8 +141,9 @@ jobs:
           exit 1
 
       - name: Unit + integration + compatibility
+        # Same token for server boot and suites — job env provides it; a
+        # step-level override would 401 every authenticated request.
         run: |
-          export UPVECTOR_TOKEN=test
           bun test tests/unit
           bun test tests/integration
           bun test tests/compatibility

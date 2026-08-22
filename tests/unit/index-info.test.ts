@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { ValidationError } from "../../src/errors"
 import { parseMetricFromInfo, validateIndexCompatibility } from "../../src/translate/index"
+import { toRedisDistanceMetric } from "../../src/translate/scores"
 
 describe("parseMetricFromInfo", () => {
 	test("reads distance_metric from RESP3 object shape", () => {
@@ -60,5 +61,23 @@ describe("validateIndexCompatibility", () => {
 
 	test("skips checks for attributes the index info did not expose", () => {
 		expect(() => validateIndexCompatibility("ns", undefined, undefined, 8, "COSINE")).not.toThrow()
+	})
+
+	test("accepts the Redis-native names the create path actually stores", () => {
+		expect(() =>
+			validateIndexCompatibility("ns", 8, "COSINE", 8, toRedisDistanceMetric("COSINE")),
+		).not.toThrow()
+		expect(() =>
+			validateIndexCompatibility("ns", 8, "L2", 8, toRedisDistanceMetric("EUCLIDEAN")),
+		).not.toThrow()
+		expect(() =>
+			validateIndexCompatibility("ns", 8, "IP", 8, toRedisDistanceMetric("DOT_PRODUCT")),
+		).not.toThrow()
+	})
+
+	test("rejects when the stored Redis metric maps from a different config value", () => {
+		expect(() =>
+			validateIndexCompatibility("ns", 8, "IP", 8, toRedisDistanceMetric("EUCLIDEAN")),
+		).toThrow(/Distance metric mismatch/)
 	})
 })

@@ -37,10 +37,15 @@ export async function loadDimension(ns: string): Promise<number | undefined> {
 		if (dim !== undefined) {
 			dimensionMap.set(ns, dim)
 			knownIndexes.add(idx)
+			// Metric is process-wide config; dimension is being discovered
+			// here, so only metric compatibility is checkable at this boundary.
+			validateIndexCompatibility(ns, dim, parseMetricFromInfo(info), undefined, config.metric)
 			return dim
 		}
-	} catch {
-		// Index does not exist yet — that's fine, the caller will create it
+	} catch (err) {
+		// Index does not exist yet — that's fine, the caller will create it.
+		// Compatibility mismatches must surface instead of being swallowed.
+		if (err instanceof ValidationError) throw err
 	}
 	return undefined
 }
@@ -118,7 +123,9 @@ async function createIndexInternal(ns: string, dimension: number, idx: string): 
 						actualDim,
 						parseMetricFromInfo(info),
 						dimension,
-						config.metric,
+						// FT.INFO reports the Redis-native name (L2/IP/COSINE);
+						// compare against what we would have created.
+						toRedisDistanceMetric(config.metric),
 					)
 					return
 				}
@@ -186,15 +193,19 @@ export async function syncIndexes(): Promise<void> {
 
 	for (const idx of indexes) {
 		knownIndexes.add(idx)
+		const ns = idx.startsWith("idx:") ? idx.slice(4) : idx
 		try {
 			const info = await redis.send("FT.INFO", [idx])
 			const dim = parseDimensionFromInfo(info)
 			if (dim !== undefined) {
-				const ns = idx.startsWith("idx:") ? idx.slice(4) : idx
 				dimensionMap.set(ns, dim)
 			}
-		} catch {
-			// Index may have been dropped between _LIST and INFO
+			validateIndexCompatibility(ns, dim, parseMetricFromInfo(info), undefined, config.metric)
+		} catch (err) {
+			// Index may have been dropped between _LIST and INFO; a
+			// compatibility mismatch aborts startup instead of mis-scoring
+			// every query for the process lifetime.
+			if (err instanceof ValidationError) throw err
 		}
 	}
 
@@ -310,7 +321,7 @@ export function validateIndexCompatibility(
 	ns: string,
 	actualDim: number | undefined,
 	actualMetric: string | undefined,
-	wantDim: number,
+	wantDim: number | undefined,
 	wantMetric: string,
 ): void {
 	if (actualMetric !== undefined && actualMetric.toUpperCase() !== wantMetric.toUpperCase()) {
@@ -318,7 +329,7 @@ export function validateIndexCompatibility(
 			`Distance metric mismatch: namespace "${ns}" index expects ${actualMetric}, configured ${wantMetric}`,
 		)
 	}
-	if (actualDim !== undefined && actualDim !== wantDim) {
+	if (actualDim !== undefined && wantDim !== undefined && actualDim !== wantDim) {
 		throw new ValidationError(`Dimension mismatch: namespace expects ${actualDim}, got ${wantDim}`)
 	}
 }
