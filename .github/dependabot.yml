@@ -1,14 +1,55 @@
 version: 2
 updates:
-  - package-ecosystem: "npm"
+  # bun.lock dependencies. @upstash/vector stays ungrouped on purpose: it is
+  # the compatibility target, its bumps must be reviewed against the SDK
+  # compat suite individually, never folded into a tooling batch.
+  - package-ecosystem: "bun"
     directory: "/"
     schedule:
       interval: "weekly"
-    allow:
-      - dependency-name: "@upstash/vector"
+    open-pull-requests-limit: 5
+    ignore:
+      # TypeScript 7 is a deliberate hold: migrate only with a verified
+      # dedicated pass (docs/RUNBOOK.md).
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+    commit-message:
+      prefix: "deps:"
+      prefix-development: "deps-dev:"
+    labels:
+      - "dependencies"
+
+  # CI action pins across .github/workflows/
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "ci:"
+    labels:
+      - "dependencies"
+
+  # oven/bun base image in Dockerfile
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
     commit-message:
       prefix: "deps:"
     labels:
       - "dependencies"
-      - "sdk-compat"
-    open-pull-requests-limit: 1
+
+  # redis/redis-stack-server pin in docker-compose.yml
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps:"
+    labels:
+      - "dependencies"
+      - "redis-stack"

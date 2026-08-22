@@ -15,7 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     services:
       redis:
-        image: redis/redis-stack-server:latest
+        # Pinned baseline; redis-stack@latest is exercised weekly by the
+        # canary-redis job in maintenance.yml. Bump after that goes green.
+        image: redis/redis-stack-server:7.4.0-v8
         ports:
           - 6379:6379
         options: >-

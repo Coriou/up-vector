@@ -1,0 +1,298 @@
+name: Maintenance
+
+# Weekly drift canaries + security audit. Everything here watches things that
+# float OUTSIDE our lockfile: Bun runtime, Redis Stack image, npm advisory DB,
+# and the Docker artifact path users actually deploy.
+#
+# Failure model:
+#   - Vulnerabilities found      -> "Security: ..." issue (security-audit job)
+#   - Canary / smoke job failed  -> "Maintenance: scheduled run failures" issue (notify job)
+# Triage guidance for each signal: docs/RUNBOOK.md
+
+on:
+  schedule:
+    - cron: "30 9 * * 1" # Monday 09:30 UTC, after the SDK compat run (09:00)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  BUN_PIN: "1.3.6" # must match test.yml / compat.yml
+  REDIS_PIN: "7.4.0-v8" # must match test.yml / compat.yml / docker-compose.yml
+
+jobs:
+  security-audit:
+    name: Security audit (bun audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_PIN }}
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - run: bun install --frozen-lockfile
+
+      - name: Audit lockfile against advisory DB
+        id: audit
+        run: |
+          set +e
+          bun audit --json > audit.json
+          STATUS=$?
+          set -e
+
+          # Empty output + failure = registry/network error, not "no vulns".
+          # Fail the job so the notify issue fires instead of staying silent.
+          if [ ! -s audit.json ]; then
+            echo "::error::bun audit produced no output (exit $STATUS) — infra failure"
+            exit 1
+          fi
+
+          COUNT=$(jq '[.[] | length] | add // 0' audit.json)
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "Advisories found: $COUNT"
+
+          if [ "$COUNT" -gt 0 ]; then
+            {
+              echo "| Advisory | Severity | Vulnerable versions |"
+              echo "| --- | --- | --- |"
+              jq -r '.[] | .[] | "| [\(.title)](\(.url)) | \(.severity) | \(.["vulnerable_versions"]) |"' audit.json
+            } > audit-report.md
+          fi
+
+      - name: Open or update security issue
+        if: steps.audit.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COUNT: ${{ steps.audit.outputs.count }}
+        run: |
+          TITLE="Security: ${COUNT} dependency vulnerabilities (bun audit)"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          gh label create security --color D93F0B --description "Dependency vulnerabilities" 2>/dev/null || true
+          gh label create automated --color EDEDED --description "Opened by automation" 2>/dev/null || true
+
+          # shellcheck disable=SC2016
+          BODY=$(printf 'Scheduled `bun audit` found **%s** advisories against the lockfile.\n\n%s\n\n**Workflow run:** %s\n' \
+            "$COUNT" "$(cat audit-report.md)" "$RUN_URL")
+
+          EXISTING=$(gh issue list --state open --label security --json number,title \
+            --jq ".[] | select(.title == \"$TITLE\") | .number" | head -1)
+          if [ -n "$EXISTING" ]; then
+            echo "Issue #$EXISTING already open for this advisory set, commenting"
+            gh issue comment "$EXISTING" --body "$BODY"
+          else
+            gh issue create --title "$TITLE" --label "security,automated" --body "$BODY"
+          fi
+
+  canary-bun:
+    name: "Canary: bun@latest"
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis/redis-stack-server:7.4.0-v8
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      UPVECTOR_TOKEN: test-token-123
+      UPVECTOR_REDIS_URL: redis://localhost:6379
+      UPVECTOR_EMBEDDING_PROVIDER: fake
+      UPVECTOR_EMBEDDING_MODEL: fake-embedding
+      UPVECTOR_EMBEDDING_DIMENSION: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+      - name: Bun version under test
+        run: bun --version
+
+      - name: Start up-vector
+        run: |
+          bun run src/index.ts > up-vector.log 2>&1 &
+          echo $! > up-vector.pid
+
+      - name: Wait for server
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/health >/dev/null; then
+              echo "up-vector healthy after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::up-vector did not become healthy within 30s"
+          cat up-vector.log || true
+          exit 1
+
+      - name: Unit + integration + compatibility
+        run: |
+          export UPVECTOR_TOKEN=test
+          bun test tests/unit
+          bun test tests/integration
+          bun test tests/compatibility
+
+      - name: up-vector logs on failure
+        if: failure()
+        run: cat up-vector.log || true
+
+  canary-redis:
+    name: "Canary: redis-stack@latest"
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis/redis-stack-server:latest
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      UPVECTOR_TOKEN: test-token-123
+      UPVECTOR_REDIS_URL: redis://localhost:6379
+      UPVECTOR_EMBEDDING_PROVIDER: fake
+      UPVECTOR_EMBEDDING_MODEL: fake-embedding
+      UPVECTOR_EMBEDDING_DIMENSION: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_PIN }}
+
+      - run: bun install
+
+      - name: Start up-vector
+        run: |
+          bun run src/index.ts > up-vector.log 2>&1 &
+          echo $! > up-vector.pid
+
+      - name: Wait for server
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/health >/dev/null; then
+              echo "up-vector healthy after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::up-vector did not become healthy within 30s"
+          cat up-vector.log || true
+          exit 1
+
+      - name: Integration + compatibility against latest Redis Stack
+        run: |
+          bun test tests/integration
+          bun test tests/compatibility
+
+      - name: up-vector logs on failure
+        if: failure()
+        run: cat up-vector.log || true
+
+  docker-smoke:
+    name: Docker build + smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t up-vector:smoke .
+
+      - name: Boot stack and exercise the built artifact
+        run: |
+          docker network create smoke
+          docker run -d --name redis --network smoke \
+            redis/redis-stack-server:${{ env.REDIS_PIN }}
+          docker run -d --name upvector --network smoke \
+            -e UPVECTOR_TOKEN=smoke-token \
+            -e UPVECTOR_REDIS_URL=redis://redis:6379 \
+            up-vector:smoke
+
+          curl_() {
+            docker run --rm --network smoke curlimages/curl:latest "$@"
+          }
+
+          ok=0
+          for i in $(seq 1 30); do
+            if curl_ -sf http://upvector:8080/health >/dev/null; then
+              echo "healthy after ${i}s"
+              ok=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ok" != "1" ]; then
+            echo "::error::container never became healthy"
+            docker logs upvector || true
+            exit 1
+          fi
+
+          # Roundtrip through the deployed artifact: upsert then query.
+          curl_ -sf -X POST http://upvector:8080/upsert \
+            -H "Authorization: Bearer smoke-token" \
+            -H "Content-Type: application/json" \
+            -d '{"id":"smoke-1","vector":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8],"metadata":{"source":"smoke"}}'
+          echo
+
+          curl_ -sf -X POST http://upvector:8080/query \
+            -H "Authorization: Bearer smoke-token" \
+            -H "Content-Type: application/json" \
+            -d '{"vector":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8],"topK":1,"includeVectors":false}'
+          echo
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f redis upvector 2>/dev/null || true
+
+  notify:
+    name: Open issue on failures
+    needs: [security-audit, canary-bun, canary-redis, docker-smoke]
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create or comment on failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # shellcheck disable=SC2016
+          FAILED=$(jq -r '[to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key] | join(", ")' \
+            <<< '${{ toJSON(needs) }}')
+          if [ -z "$FAILED" ]; then
+            echo "No failed jobs, nothing to report"
+            exit 0
+          fi
+
+          TITLE="Maintenance: scheduled run failures"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          gh label create maintenance --color FBCA04 --description "Scheduled maintenance run failures" 2>/dev/null || true
+          gh label create automated --color EDEDED --description "Opened by automation" 2>/dev/null || true
+
+          # shellcheck disable=SC2016
+          BODY=$(printf 'Scheduled maintenance run failed.\n\n**Failed jobs:** %s\n\n**Workflow run:** %s\n\nTriage guidance: `docs/RUNBOOK.md`.\n' \
+            "$FAILED" "$RUN_URL")
+
+          EXISTING=$(gh issue list --state open --label maintenance --json number,title \
+            --jq ".[] | select(.title == \"$TITLE\") | .number" | head -1)
+          if [ -n "$EXISTING" ]; then
+            echo "Issue #$EXISTING already open, commenting"
+            gh issue comment "$EXISTING" --body "$BODY"
+          else
+            gh issue create --title "$TITLE" --label "maintenance,automated" --body "$BODY"
+          fi
