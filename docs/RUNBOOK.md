@@ -17,7 +17,7 @@ Principles:
 - Every automated signal lands as an issue with a stable label. No signal lives
   only in a log nobody reads.
 
-Verified baseline at runbook creation (2026-08-22): **381 tests** — 247 unit /
+Verified baseline at runbook creation (2026-08-22): **383 tests** — 249 unit /
 60 integration / 74 SDK compatibility — green on Bun 1.3.6-pinned CI, local Bun
 1.3.14, Redis Stack `7.4.0-v8`, hono `4.13.3`.
 

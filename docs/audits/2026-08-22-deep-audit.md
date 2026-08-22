@@ -27,6 +27,6 @@ further; finders were re-prompted blind, so repeat runs re-test them.
 
 ## Verification state at close of pass
 
-Full gate green after fixes: **381 tests** — 247 unit / 60 integration / 74 SDK
+Full gate green after fixes: **383 tests** — 249 unit / 60 integration / 74 SDK
 compatibility — via `./scripts/test-all.sh` on Bun 1.3.14 local / Redis Stack
 `7.4.0-v8`; typecheck + Biome clean; `bun audit` clean on hono 4.13.3.
