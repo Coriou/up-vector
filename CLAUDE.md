@@ -13,7 +13,7 @@ Sibling project to [up-redis](https://github.com/Coriou/up-redis) (same idea, bu
 - **Validation:** Zod v4
 - **Linting/Format:** Biome v2
 - **Testing:** `bun test` (built-in, Jest-compatible)
-- **Container:** Docker (oven/bun:alpine) + Redis Stack
+- **Container:** Docker (oven/bun:1.3-alpine) + Redis Stack (pinned `7.4.0-v8`)
 
 **Not a Next.js/Vercel project.** Pure backend service.
 
@@ -154,7 +154,7 @@ All prefixed `UPVECTOR_`:
 ## Implementation Status
 
 Phases 1-6 complete. Dense-vector CRUD + query + filtering + namespaces + production hardening + provider-backed `/upsert-data`/`/query-data`.
-372 tests passing (238 unit, 60 integration, 74 SDK compatibility).
+383 tests passing (249 unit, 60 integration, 74 SDK compatibility).
 Production hardening includes structured JSON logging, graceful shutdown, health probes, request timeouts, Prometheus metrics (optional scrape token), body limits, binary vector round-trip protection, Redis client self-heal, and process-level error handlers.
 See `PLAN.md` for the full architecture and phase breakdown.
 
@@ -169,6 +169,7 @@ See `PLAN.md` for the full architecture and phase breakdown.
 
 - [Upstash Vector REST API](https://upstash.com/docs/vector/api/endpoints) — the API we're replicating
 - [@upstash/vector SDK](https://github.com/upstash/vector-js) — client SDK, also our compatibility test target
+- [Maintenance Runbook](docs/RUNBOOK.md) — recurring automation (canaries, security audit, Dependabot), triage playbook, release gate, deep-audit procedure
 - [RediSearch vector search](https://redis.io/docs/latest/develop/interact/search-and-query/query/vector-search/)
 - [RediSearch FT.CREATE](https://redis.io/docs/latest/commands/ft.create/) / [FT.SEARCH](https://redis.io/docs/latest/commands/ft.search/)
 - [up-redis](https://github.com/Coriou/up-redis) — sibling project (same pattern, but for standard Redis commands)

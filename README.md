@@ -136,7 +136,7 @@ curl -X POST http://localhost:8080/query-data \
 
 ## API Compatibility
 
-Implements the dense-vector subset of the [Upstash Vector REST API](https://upstash.com/docs/vector/api/endpoints), plus dense `/upsert-data` and `/query-data` through a configurable embedding provider. Validated by 372 tests including 74 using the real `@upstash/vector` SDK.
+Implements the dense-vector subset of the [Upstash Vector REST API](https://upstash.com/docs/vector/api/endpoints), plus dense `/upsert-data` and `/query-data` through a configurable embedding provider. Validated by 383 tests including 74 using the real `@upstash/vector` SDK.
 
 | Surface | Status | Notes |
 |----------|--------|-------|
@@ -290,11 +290,11 @@ bun run typecheck        # TypeScript check
 
 ### Testing
 
-372 tests across three tiers:
+383 tests across three tiers:
 
 | Tier | Tests | Purpose |
 |------|-------|---------|
-| **Unit** | 238 | Filter parser, embedding providers, vector encode/decode, score normalization, key naming, middleware/config hardening |
+| **Unit** | 249 | Filter parser, embedding providers, vector encode/decode, score normalization, key naming, middleware/config hardening |
 | **Integration** | 60 | End-to-end REST behavior against Redis Stack, including raw-text data endpoints |
 | **SDK Compatibility** | 74 | Real `@upstash/vector` SDK against up-vector |
 
@@ -324,7 +324,7 @@ Both services can share the same Redis Stack instance — up-redis handles stand
 ```yaml
 services:
   redis-stack:
-    image: redis/redis-stack-server:latest
+    image: redis/redis-stack-server:7.4.0-v8
 
   up-redis:
     image: ghcr.io/coriou/up-redis:latest
