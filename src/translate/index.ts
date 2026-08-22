@@ -101,24 +101,29 @@ async function createIndexInternal(ns: string, dimension: number, idx: string): 
 		])
 	} catch (err: unknown) {
 		const msg = err instanceof Error ? err.message : String(err)
+		// Index exists from a previous run — query its actual dimension and
+		// distance metric and fail loudly if they don't match the configured
+		// values. Without the metric check, restarting with a different
+		// UPVECTOR_METRIC against existing data silently normalizes scores
+		// with the wrong formula.
 		if (msg.includes("Index already exists")) {
-			// Index exists from a previous run — query its actual dimension and
-			// fail loudly if the caller's dimension doesn't match.
 			try {
 				const info = await redis.send("FT.INFO", [idx])
 				const actualDim = parseDimensionFromInfo(info)
 				if (actualDim !== undefined) {
 					dimensionMap.set(ns, actualDim)
 					knownIndexes.add(idx)
-					if (actualDim !== dimension) {
-						throw new ValidationError(
-							`Dimension mismatch: namespace expects ${actualDim}, got ${dimension}`,
-						)
-					}
+					validateIndexCompatibility(
+						ns,
+						actualDim,
+						parseMetricFromInfo(info),
+						dimension,
+						config.metric,
+					)
 					return
 				}
 			} catch (infoErr) {
-				// Bubble up dimension mismatches; tolerate transient FT.INFO failures
+				// Bubble up validation mismatches; tolerate transient FT.INFO failures
 				if (infoErr instanceof ValidationError) {
 					throw infoErr
 				}
@@ -127,7 +132,6 @@ async function createIndexInternal(ns: string, dimension: number, idx: string): 
 			throw err
 		}
 	}
-
 	knownIndexes.add(idx)
 	dimensionMap.set(ns, dimension)
 }
@@ -249,4 +253,72 @@ function parseDimensionFromInfo(info: any): number | undefined {
 		}
 	}
 	return undefined
+}
+
+// FT.INFO returns either a RESP3 object ({ attributes: [{...}] }) or a RESP2
+// flat array ([..., "attributes", [[...], ...]]). The shape varies by Redis
+// version, so narrow defensively instead of trusting one shape.
+function infoAttributes(info: unknown): unknown[] {
+	// RESP3 object form: { attributes: [{...}, ...] }
+	if (typeof info === "object" && info !== null && !Array.isArray(info)) {
+		const attrs = (info as Record<string, unknown>).attributes
+		if (Array.isArray(attrs)) {
+			return attrs.filter((a: unknown) => Array.isArray(a) || (typeof a === "object" && a !== null))
+		}
+	}
+	// RESP2 flat form: [..., "attributes", [["TYPE","FLOAT32",...], ...]]
+	if (Array.isArray(info)) {
+		for (let i = 0; i < info.length - 1; i++) {
+			if (info[i] === "attributes" && Array.isArray(info[i + 1])) {
+				return info[i + 1].filter(
+					(a: unknown) => Array.isArray(a) || (typeof a === "object" && a !== null),
+				)
+			}
+		}
+	}
+	return []
+}
+
+export function parseMetricFromInfo(info: unknown): string | undefined {
+	for (const field of infoAttributes(info)) {
+		if (Array.isArray(field)) {
+			// Attribute rendered as alternating key/value pairs.
+			for (let j = 0; j < field.length - 1; j++) {
+				if (
+					String(field[j]).toUpperCase() === "DISTANCE_METRIC" &&
+					typeof field[j + 1] !== "undefined"
+				) {
+					return String(field[j + 1])
+				}
+			}
+		} else if (typeof field === "object" && field !== null) {
+			const record = field as Record<string, unknown> // narrowed by the guard above
+			const metric = record.distance_metric ?? record.DISTANCE_METRIC
+			if (typeof metric === "string") return metric
+		}
+	}
+	return undefined
+}
+
+/**
+ * Compare an existing index's FT.INFO attributes against what we would have
+ * created. Mismatch means the operator changed UPVECTOR_DIMENSION or
+ * UPVECTOR_METRIC against data written under different settings — queries and
+ * upserts must fail loudly instead of silently mis-scoring.
+ */
+export function validateIndexCompatibility(
+	ns: string,
+	actualDim: number | undefined,
+	actualMetric: string | undefined,
+	wantDim: number,
+	wantMetric: string,
+): void {
+	if (actualMetric !== undefined && actualMetric.toUpperCase() !== wantMetric.toUpperCase()) {
+		throw new ValidationError(
+			`Distance metric mismatch: namespace "${ns}" index expects ${actualMetric}, configured ${wantMetric}`,
+		)
+	}
+	if (actualDim !== undefined && actualDim !== wantDim) {
+		throw new ValidationError(`Dimension mismatch: namespace expects ${actualDim}, got ${wantDim}`)
+	}
 }
