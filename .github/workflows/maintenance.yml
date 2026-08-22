@@ -27,13 +27,13 @@ jobs:
     name: Security audit (bun audit)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_PIN }}
 
       - name: Cache Bun dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
@@ -113,7 +113,7 @@ jobs:
       UPVECTOR_EMBEDDING_MODEL: fake-embedding
       UPVECTOR_EMBEDDING_DIMENSION: 8
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -172,7 +172,7 @@ jobs:
       UPVECTOR_EMBEDDING_MODEL: fake-embedding
       UPVECTOR_EMBEDDING_DIMENSION: 8
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_PIN }}
@@ -210,7 +210,7 @@ jobs:
     name: Docker build + smoke
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build image
         run: docker build -t up-vector:smoke .
