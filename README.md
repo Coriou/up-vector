@@ -19,7 +19,18 @@ cp .env.example .env
 docker compose up -d
 ```
 
-The API is now available at `http://localhost:8080`.
+The stack intentionally publishes **no host port** (`expose` only), so platform proxies
+like [Coolify](https://coolify.io) can join the Docker network and front the service directly.
+To reach it from your own machine instead, drop in an override before `up -d`:
+
+```yaml
+# docker-compose.override.yml
+services:
+  up-vector:
+    ports: ["${UPVECTOR_PORT:-8080}:8080"]
+```
+
+The API is then available at `http://localhost:8080`.
 
 ## Usage with @upstash/vector
 
@@ -314,7 +325,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup and contribution 
 
 ```bash
 cp .env.example .env     # Set UPVECTOR_TOKEN
-docker compose up -d     # Starts up-vector + Redis Stack
+docker compose up -d     # Starts up-vector + Redis Stack (network-internal; see Quick Start for host access)
 ```
 
 ### With up-redis (side-by-side)

@@ -16,6 +16,23 @@ function redactUrl(url: string): string {
 		return "***"
 	}
 }
+/**
+ * Derive Bun.serve's idleTimeout (seconds) from the app-level request budget.
+ *
+ * Bun defaults idleTimeout to 10s, which silently resets the connection
+ * whenever a handler legitimately stays silent past that point — well below
+ * UPVECTOR_REQUEST_TIMEOUT's default of 30s, whose expiry is supposed to
+ * produce a proper HTTP 504. The derived ceiling must exceed the app-level
+ * budget so our timeout middleware wins the race against Bun killing the
+ * socket. Bun caps idleTimeout at 255 seconds.
+ */
+export function deriveIdleTimeoutSeconds(requestTimeoutMs: number): number {
+	if (requestTimeoutMs === 0) {
+		// App-level timeout disabled: keep sockets open up to Bun's maximum.
+		return 255
+	}
+	return Math.min(255, Math.max(15, Math.ceil((requestTimeoutMs + 5000) / 1000)))
+}
 
 async function main(): Promise<void> {
 	await initRedis()
@@ -28,6 +45,7 @@ async function main(): Promise<void> {
 		fetch: app.fetch,
 		port: config.port,
 		hostname: config.host,
+		idleTimeout: deriveIdleTimeoutSeconds(config.requestTimeout),
 	})
 
 	log.info("server started", {
@@ -125,8 +143,10 @@ async function main(): Promise<void> {
 						unhealthySince = null
 					} catch (err: unknown) {
 						const msg = err instanceof Error ? err.message : String(err)
-						log.error("redis reinit failed, will retry", { error: msg })
-						unhealthySince = now
+						// Leave unhealthySince untouched: it stays past the threshold, so
+						// the very next tick retries instead of waiting the full
+						// redisReinitAfterMs again. Reset to null only on success.
+						log.error("redis reinit failed, will retry on next tick", { error: msg })
 					}
 				}
 			} finally {
@@ -138,9 +158,11 @@ async function main(): Promise<void> {
 	}
 }
 
-main().catch((err) => {
-	const message = err instanceof Error ? err.message : String(err)
-	const stack = err instanceof Error ? err.stack : undefined
-	log.error("failed to start", { error: message, stack })
-	process.exit(1)
-})
+if (import.meta.main) {
+	main().catch((err) => {
+		const message = err instanceof Error ? err.message : String(err)
+		const stack = err instanceof Error ? err.stack : undefined
+		log.error("failed to start", { error: message, stack })
+		process.exit(1)
+	})
+}

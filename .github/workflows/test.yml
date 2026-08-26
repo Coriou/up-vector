@@ -24,7 +24,7 @@ jobs:
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
 
-      - run: bun install
+      - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run lint
       - run: bun test tests/unit
@@ -66,7 +66,7 @@ jobs:
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
 
-      - run: bun install
+      - run: bun install --frozen-lockfile
 
       - name: Start up-vector
         run: |

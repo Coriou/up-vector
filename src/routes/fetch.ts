@@ -3,6 +3,7 @@ import { z } from "zod"
 import { getClient } from "../redis"
 import {
 	parseVectorKey,
+	validateId,
 	validateNamespace,
 	validatePrefix,
 	vectorKey,
@@ -11,16 +12,12 @@ import {
 import { decodeVectorBase64 } from "../translate/vectors"
 import type { Vector } from "../types"
 
-const MAX_ID_LENGTH = 1024
-
 const idSchema = z
 	.union([
 		z.string(),
 		z.number().refine((n) => Number.isFinite(n), "Vector ID must be a finite number"),
 	])
 	.transform(String)
-	.refine((s) => s.length > 0, "Vector ID must not be empty")
-	.refine((s) => s.length <= MAX_ID_LENGTH, `Vector ID must not exceed ${MAX_ID_LENGTH} characters`)
 
 const FetchBody = z.object({
 	ids: z.array(idSchema).max(1000, "Batch must not exceed 1000 ids").optional(),
@@ -37,6 +34,11 @@ const handleFetch = async (c: Context) => {
 	const parsed = FetchBody.parse(body)
 	const ns = c.req.param("namespace") ?? ""
 	validateNamespace(ns)
+	if (parsed.ids) {
+		// Read paths share the write-path ID contract (update.ts) — empty ids,
+		// control characters, and over-length ids are rejected identically.
+		for (const id of parsed.ids) validateId(id)
+	}
 	const redis = getClient()
 
 	// Fetch by IDs (default path, also used when both ids and prefix are given)

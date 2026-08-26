@@ -85,6 +85,56 @@ type OpenAIEmbeddingResponse = {
 	}
 }
 
+/**
+ * Provider-side /embeddings requests have per-request budgets (~300k tokens on
+ * OpenAI); a locally-valid batch (up to 1000 inputs x up to ~1M chars each)
+ * can deterministically exceed them and fail the whole batch with a
+ * non-retryable 400. embedMany splits inputs into chunks bounded by both:
+ */
+export const EMBED_MAX_ITEMS_PER_REQUEST = 256
+export const EMBED_MAX_CHARS_PER_REQUEST = 250_000
+
+/**
+ * Split inputs into provider-request-sized chunks (greedy: whichever bound —
+ * item count or total characters — fills first closes a chunk). A single
+ * oversized input still forms its own chunk; the provider enforces per-item
+ * limits. Chunk boundaries preserve input order.
+ */
+export function chunkEmbeddingInputs(inputs: string[]): string[][] {
+	const chunks: string[][] = []
+	let current: string[] = []
+	let currentChars = 0
+	for (const input of inputs) {
+		if (
+			current.length > 0 &&
+			(current.length === EMBED_MAX_ITEMS_PER_REQUEST ||
+				currentChars + input.length > EMBED_MAX_CHARS_PER_REQUEST)
+		) {
+			chunks.push(current)
+			current = []
+			currentChars = 0
+		}
+		current.push(input)
+		currentChars += input.length
+	}
+	if (current.length > 0) chunks.push(current)
+	return chunks
+}
+
+/**
+ * An in-flight provider request plus its deadline handle. The abort timer
+ * stays armed until `settle()` is called after the response BODY is fully
+ * consumed — a provider can deliver headers promptly and then stall mid-body,
+ * which would otherwise hang forever despite UPVECTOR_EMBEDDING_TIMEOUT_MS.
+ */
+type RequestDeadline = {
+	response: Response
+	/** Disarm the deadline (idempotent). Must be called exactly once, after body consumption. */
+	settle: () => void
+	/** Whether the deadline fired before settle(). */
+	timedOut: () => boolean
+}
+
 export class OpenAICompatibleEmbeddingProvider implements EmbeddingProvider {
 	readonly name = "openai"
 	readonly model: string
@@ -110,29 +160,49 @@ export class OpenAICompatibleEmbeddingProvider implements EmbeddingProvider {
 	async embedMany(inputs: string[]): Promise<number[][]> {
 		if (inputs.length === 0) return []
 
+		const chunks = chunkEmbeddingInputs(inputs)
+		// Chunks are embedded sequentially so strict input→embedding order holds;
+		// all-or-nothing semantics: any chunk that exhausts its retries fails
+		// the entire call.
+		const embeddings: number[][] = []
+		for (const chunk of chunks) {
+			embeddings.push(...(await this.embedChunk(chunk)))
+		}
+		return embeddings
+	}
+
+	private async embedChunk(chunk: string[]): Promise<number[][]> {
 		for (let attempt = 0; attempt <= this.retries; attempt++) {
 			try {
-				const response = await this.request(inputs)
-				if (response.ok) {
-					return await this.parseResponse(response, inputs.length)
-				}
+				const deadline = await this.request(chunk)
+				try {
+					if (deadline.response.ok) {
+						return await this.underDeadline(deadline, () =>
+							this.parseResponse(deadline.response, chunk.length),
+						)
+					}
 
-				if (isRetryableStatus(response.status) && attempt < this.retries) {
-					await sleep(this.retryDelayMs(attempt, response.headers.get("retry-after")))
-					continue
-				}
+					if (isRetryableStatus(deadline.response.status) && attempt < this.retries) {
+						await sleep(this.retryDelayMs(attempt, deadline.response.headers.get("retry-after")))
+						continue
+					}
 
-				const message = await readProviderError(response)
-				if (message) {
-					log.warn("embedding provider error", {
-						status: response.status,
-						providerMessage: message,
-					})
+					const message = await this.underDeadline(deadline, () =>
+						readProviderError(deadline.response),
+					)
+					if (message) {
+						log.warn("embedding provider error", {
+							status: deadline.response.status,
+							providerMessage: message,
+						})
+					}
+					throw new EmbeddingProviderError(
+						`Embedding provider failed with HTTP ${deadline.response.status}`,
+						502,
+					)
+				} finally {
+					deadline.settle()
 				}
-				throw new EmbeddingProviderError(
-					`Embedding provider failed with HTTP ${response.status}`,
-					502,
-				)
 			} catch (err) {
 				if (err instanceof EmbeddingProviderError) {
 					if (err.status === 504 && attempt < this.retries) {
@@ -152,7 +222,7 @@ export class OpenAICompatibleEmbeddingProvider implements EmbeddingProvider {
 		throw new EmbeddingProviderError("Embedding provider request failed", 502)
 	}
 
-	private async request(inputs: string[]): Promise<Response> {
+	private async request(inputs: string[]): Promise<RequestDeadline> {
 		const body: Record<string, unknown> = {
 			model: this.model,
 			input: inputs,
@@ -161,30 +231,55 @@ export class OpenAICompatibleEmbeddingProvider implements EmbeddingProvider {
 			body.dimensions = this.dimension
 		}
 
+		const init = (): RequestInit => ({
+			method: "POST",
+			headers: this.headers(),
+			body: JSON.stringify(body),
+		})
+
 		if (this.timeoutMs === 0) {
-			return this.fetchFn(`${this.baseUrl}/embeddings`, {
-				method: "POST",
-				headers: this.headers(),
-				body: JSON.stringify(body),
-			})
+			// Timeout disabled: no controller, nothing to arm or settle.
+			const response = await this.fetchFn(`${this.baseUrl}/embeddings`, init())
+			return { response, settle: () => {}, timedOut: () => false }
 		}
 
 		const controller = new AbortController()
 		const timeout = setTimeout(() => controller.abort(), this.timeoutMs)
 		try {
-			return await this.fetchFn(`${this.baseUrl}/embeddings`, {
-				method: "POST",
-				headers: this.headers(),
-				body: JSON.stringify(body),
+			const response = await this.fetchFn(`${this.baseUrl}/embeddings`, {
+				...init(),
 				signal: controller.signal,
 			})
+			// Keep the deadline armed across body reads; see RequestDeadline.
+			return {
+				response,
+				settle: () => clearTimeout(timeout),
+				timedOut: () => controller.signal.aborted,
+			}
 		} catch (err) {
+			clearTimeout(timeout)
 			if (controller.signal.aborted) {
 				throw new EmbeddingProviderError("Embedding provider timed out", 504)
 			}
 			throw err
+		}
+	}
+
+	/**
+	 * Read the response body under the still-armed request deadline. A stalled
+	 * body surfaces through the standard timeout error (504), which feeds the
+	 * existing retry logic.
+	 */
+	private async underDeadline<T>(deadline: RequestDeadline, read: () => Promise<T>): Promise<T> {
+		try {
+			return await read()
+		} catch (err) {
+			if (deadline.timedOut()) {
+				throw new EmbeddingProviderError("Embedding provider timed out", 504)
+			}
+			throw err
 		} finally {
-			clearTimeout(timeout)
+			deadline.settle()
 		}
 	}
 

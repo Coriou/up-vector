@@ -6,11 +6,7 @@ import { EmbeddingProviderError, ValidationError } from "../errors"
 import { getClient } from "../redis"
 import { loadDimension } from "../translate/index"
 import { EMBEDDING_NS_REGISTRY, validateId, validateNamespace, vectorKey } from "../translate/keys"
-import { encodeVector, encodeVectorBase64 } from "../translate/vectors"
-
-const finiteNumber = z.number().refine((n) => Number.isFinite(n), {
-	message: "Vector values must be finite numbers (no NaN or Infinity)",
-})
+import { encodeVector, encodeVectorBase64, finiteNumber } from "../translate/vectors"
 
 // Numeric IDs that aren't finite would silently become "NaN" / "Infinity"
 // strings after the .transform(String) below — reject them up front so users

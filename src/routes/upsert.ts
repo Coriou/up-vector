@@ -4,11 +4,7 @@ import { ValidationError } from "../errors"
 import { getClient } from "../redis"
 import { ensureIndex, loadDimension, setDetectedDimension } from "../translate/index"
 import { NS_REGISTRY, validateId, validateNamespace, vectorKey } from "../translate/keys"
-import { encodeVector, encodeVectorBase64 } from "../translate/vectors"
-
-const finiteNumber = z.number().refine((n) => Number.isFinite(n), {
-	message: "Vector values must be finite numbers (no NaN or Infinity)",
-})
+import { encodeVector, encodeVectorBase64, finiteNumber } from "../translate/vectors"
 
 // Numeric IDs that aren't finite would silently become "NaN" / "Infinity"
 // strings after .transform(String) — reject them up front so users get a
@@ -21,22 +17,37 @@ const idSchema = z
 	.transform(String)
 
 const MAX_VECTOR_DIM = 16384
+// Parity with /upsert-data's data cap (data.ts MAX_DATA_LENGTH), plus a byte
+// budget on serialized metadata so Redis hash values stay bounded regardless
+// of entry point.
+const MAX_DATA_LENGTH = 1_000_000
+const MAX_METADATA_BYTES = 131072
+
 const UnsupportedField = z.never().optional()
 
-const VectorSchema = z.object({
+export const VectorSchema = z.object({
 	id: idSchema,
 	vector: z
 		.array(finiteNumber)
 		.min(1, "Vector dimension must be at least 1")
 		.max(MAX_VECTOR_DIM, `Vector dimension must not exceed ${MAX_VECTOR_DIM}`),
 	sparseVector: UnsupportedField,
-	metadata: z.record(z.string(), z.unknown()).optional(),
-	data: z.string().optional(),
+	metadata: z
+		.record(z.string(), z.unknown())
+		.optional()
+		.refine(
+			(m) => m === undefined || Buffer.byteLength(JSON.stringify(m), "utf8") <= MAX_METADATA_BYTES,
+			`Serialized metadata must not exceed ${MAX_METADATA_BYTES} bytes`,
+		),
+	data: z
+		.string()
+		.max(MAX_DATA_LENGTH, `Data must not exceed ${MAX_DATA_LENGTH} characters`)
+		.optional(),
 })
 
 const MAX_BATCH_SIZE = 1000
 
-const UpsertBody = z.union([
+export const UpsertBody = z.union([
 	VectorSchema,
 	z
 		.array(VectorSchema)

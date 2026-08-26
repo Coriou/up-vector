@@ -114,10 +114,18 @@ export function tokenize(input: string): Token[] {
 							throw new ValidationError(`Array index too long at position ${bracketStart}`)
 						}
 					}
+					if (bracketBody === 0) {
+						throw new ValidationError(`Empty array index at position ${bracketStart}`)
+					}
 					if (i >= input.length) {
 						throw new ValidationError(`Unclosed array index at position ${bracketStart}`)
 					}
 					i++ // skip ]
+					if (input[i] === "[") {
+						throw new ValidationError(
+							`Chained array indexing not supported at position ${bracketStart}`,
+						)
+					}
 				} else {
 					break
 				}

@@ -48,7 +48,7 @@ jobs:
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
 
-      - run: bun install
+      - run: bun install --frozen-lockfile
 
       - name: Install latest @upstash/vector
         run: bun add -d @upstash/vector@latest

@@ -118,7 +118,7 @@ jobs:
         with:
           bun-version: latest
 
-      - run: bun install
+      - run: bun install --frozen-lockfile
       - name: Bun version under test
         run: bun --version
 
@@ -177,7 +177,7 @@ jobs:
         with:
           bun-version: ${{ env.BUN_PIN }}
 
-      - run: bun install
+      - run: bun install --frozen-lockfile
 
       - name: Start up-vector
         run: |

@@ -22,7 +22,6 @@ RUN apk add --no-cache curl
 # upstream image. Running as root would let a process escape into the rest of
 # the filesystem if it ever found an arbitrary-write bug.
 COPY --from=builder --chown=bun:bun /app/dist ./dist
-COPY --from=builder --chown=bun:bun /app/node_modules ./node_modules
 COPY --from=builder --chown=bun:bun /app/package.json ./
 
 USER bun

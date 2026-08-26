@@ -3,9 +3,9 @@ import { ValidationError } from "../../src/errors"
 import {
 	_clearFilterCache,
 	compileFilter,
+	compileGlob,
 	evaluate,
 	evaluateFilter,
-	globToRegex,
 	parse,
 	resolveField,
 	tokenize,
@@ -303,48 +303,48 @@ describe("resolveField", () => {
 	})
 })
 
-// ─── globToRegex ─────────────────────────────────────────────────────────────
+// ─── compileGlob ─────────────────────────────────────────────────────────────
 
-describe("globToRegex", () => {
+describe("compileGlob", () => {
 	test("* matches any characters", () => {
-		expect(globToRegex("The *").test("The Lord")).toBe(true)
-		expect(globToRegex("The *").test("Something")).toBe(false)
+		expect(compileGlob("The *").test("The Lord")).toBe(true)
+		expect(compileGlob("The *").test("Something")).toBe(false)
 	})
 
 	test("? matches single character", () => {
-		expect(globToRegex("h?t").test("hat")).toBe(true)
-		expect(globToRegex("h?t").test("hot")).toBe(true)
-		expect(globToRegex("h?t").test("heat")).toBe(false)
+		expect(compileGlob("h?t").test("hat")).toBe(true)
+		expect(compileGlob("h?t").test("hot")).toBe(true)
+		expect(compileGlob("h?t").test("heat")).toBe(false)
 	})
 
 	test("character class", () => {
-		expect(globToRegex("[abc]at").test("cat")).toBe(true)
-		expect(globToRegex("[abc]at").test("dat")).toBe(false)
+		expect(compileGlob("[abc]at").test("cat")).toBe(true)
+		expect(compileGlob("[abc]at").test("dat")).toBe(false)
 	})
 
 	test("negated character class", () => {
-		expect(globToRegex("[^abc]at").test("dat")).toBe(true)
-		expect(globToRegex("[^abc]at").test("cat")).toBe(false)
+		expect(compileGlob("[^abc]at").test("dat")).toBe(true)
+		expect(compileGlob("[^abc]at").test("cat")).toBe(false)
 	})
 
 	test("character range", () => {
-		expect(globToRegex("[a-c]at").test("bat")).toBe(true)
-		expect(globToRegex("[a-c]at").test("fat")).toBe(false)
+		expect(compileGlob("[a-c]at").test("bat")).toBe(true)
+		expect(compileGlob("[a-c]at").test("fat")).toBe(false)
 	})
 
 	test("escapes regex specials", () => {
-		expect(globToRegex("file.txt").test("file.txt")).toBe(true)
-		expect(globToRegex("file.txt").test("filextxt")).toBe(false)
+		expect(compileGlob("file.txt").test("file.txt")).toBe(true)
+		expect(compileGlob("file.txt").test("filextxt")).toBe(false)
 	})
 
 	test("rejects patterns exceeding max length", () => {
 		const longPattern = "*".repeat(600)
-		expect(() => globToRegex(longPattern)).toThrow("Glob pattern too long")
+		expect(() => compileGlob(longPattern)).toThrow("Glob pattern too long")
 	})
 
 	test("caches compiled regex", () => {
-		const r1 = globToRegex("cache_test_*")
-		const r2 = globToRegex("cache_test_*")
+		const r1 = compileGlob("cache_test_*")
+		const r2 = compileGlob("cache_test_*")
 		expect(r1).toBe(r2) // same RegExp instance
 	})
 
@@ -353,19 +353,19 @@ describe("globToRegex", () => {
 		// evicted just because it was inserted early. Re-accessing should
 		// refresh the LRU position so it stays cached.
 		const HOT = "hot_glob_pattern_*"
-		const hotInstance = globToRegex(HOT)
+		const hotInstance = compileGlob(HOT)
 		// Touch the hot pattern several times so it's the most-recently-used.
-		for (let i = 0; i < 5; i++) globToRegex(HOT)
+		for (let i = 0; i < 5; i++) compileGlob(HOT)
 		// Then push 256 distinct patterns through the cache, more than enough
 		// to evict everything that isn't being touched.
 		for (let i = 0; i < 256; i++) {
-			globToRegex(`evict_${i}_*`)
+			compileGlob(`evict_${i}_*`)
 			// Periodically refresh the hot pattern's LRU position, mimicking a
 			// real workload where the hot filter is queried often.
-			if (i % 10 === 0) globToRegex(HOT)
+			if (i % 10 === 0) compileGlob(HOT)
 		}
 		// The hot pattern should still be the same RegExp instance.
-		expect(globToRegex(HOT)).toBe(hotInstance)
+		expect(compileGlob(HOT)).toBe(hotInstance)
 	})
 })
 
@@ -575,22 +575,22 @@ describe("evaluateFilter", () => {
 
 // ─── Hardening: edge cases ──────────────────────────────────────────────────
 
-describe("globToRegex hardening", () => {
+describe("compileGlob hardening", () => {
 	test("consecutive wildcards are collapsed", () => {
-		const re = globToRegex("a***b")
+		const re = compileGlob("a***b")
 		expect(re.test("axyzb")).toBe(true)
 		expect(re.test("ab")).toBe(true)
 		expect(re.test("axb")).toBe(true)
 	})
 
 	test("unclosed bracket treated as literal", () => {
-		const re = globToRegex("[abc")
+		const re = compileGlob("[abc")
 		expect(re.test("[abc")).toBe(true)
 		expect(re.test("a")).toBe(false)
 	})
 
 	test("empty pattern matches empty string", () => {
-		const re = globToRegex("")
+		const re = compileGlob("")
 		expect(re.test("")).toBe(true)
 		expect(re.test("a")).toBe(false)
 	})
@@ -748,8 +748,8 @@ describe("filter errors are typed ValidationError", () => {
 		expect(() => parse(tokenize("x = 1 y = 2"))).toThrow(ValidationError)
 	})
 
-	test("globToRegex throws ValidationError on overly long pattern", () => {
-		expect(() => globToRegex("*".repeat(600))).toThrow(ValidationError)
+	test("compileGlob throws ValidationError on overly long pattern", () => {
+		expect(() => compileGlob("*".repeat(600))).toThrow(ValidationError)
 	})
 
 	test("filter length cap throws ValidationError", () => {
@@ -819,5 +819,197 @@ describe("compileFilter cache", () => {
 		expect(() => compileFilter("x =")).toThrow()
 		// Errors should not be cached — a fresh attempt still throws
 		expect(() => compileFilter("x =")).toThrow()
+	})
+})
+
+// ─── Bounded glob matcher (ReDoS hardening) ─────────────────────────────────
+
+// Reference implementation of the OLD regex-based glob compiler. The bounded
+// matcher must produce an identical result-set for every benign pattern.
+function legacyRegexGlob(pattern: string): RegExp {
+	let regex = ""
+	let i = 0
+	while (i < pattern.length) {
+		const ch = pattern[i]
+		if (ch === "*") {
+			while (i + 1 < pattern.length && pattern[i + 1] === "*") i++
+			regex += ".*"
+		} else if (ch === "?") {
+			regex += "."
+		} else if (ch === "[") {
+			i++
+			let classContent = ""
+			while (i < pattern.length && pattern[i] !== "]") {
+				classContent += pattern[i]
+				i++
+			}
+			if (i >= pattern.length) {
+				regex += "\\["
+				regex += classContent.replace(/[.*+?^${}()|\\[\]]/g, "\\$&")
+				continue
+			}
+			regex += `[${classContent}]`
+		} else if (".+^${}()|\\".includes(ch)) {
+			regex += `\\${ch}`
+		} else {
+			regex += ch
+		}
+		i++
+	}
+	return new RegExp(`^${regex}$`)
+}
+
+describe("bounded glob matcher", () => {
+	const benignPatterns = [
+		"The *",
+		"*Lord",
+		"*middle*",
+		"h?t",
+		"?at",
+		"[abc]at",
+		"[^abc]at",
+		"[a-c]x?*[0-9]",
+		"file.txt",
+		"a*b*c*d",
+		"***",
+		"",
+		"x",
+		"[!ab]*end",
+		"a[0-9]b[^0-9]c",
+		"*a*a*a*a*a*b",
+		"prefix_???_*",
+	]
+	const subjects = [
+		"The Lord",
+		"Something",
+		"Lord",
+		"middle-of-road",
+		"hat",
+		"hot",
+		"heat",
+		"cat",
+		"dat",
+		"bat",
+		"fat",
+		"file.txt",
+		"filextxt",
+		"abcd",
+		"abc",
+		"",
+		"x",
+		"!zend",
+		"a1bXc",
+		"a9b9c",
+		"aaaaaaab",
+		"prefix_abc_def",
+		"b",
+		"axxxbxxx cxxxd",
+	]
+
+	test("matches identical result-set as the old regex implementation on benign patterns", () => {
+		for (const pattern of benignPatterns) {
+			for (const subject of subjects) {
+				expect(compileGlob(pattern).test(subject)).toBe(legacyRegexGlob(pattern).test(subject))
+			}
+		}
+	})
+
+	test("pathological input completes in bounded time (no catastrophic backtracking)", () => {
+		// Old regex form: ^(.*a){30 times}b$ — freezes the event loop on long
+		// non-matching subjects. The NFA scan must stay linear in n·k.
+		const pattern = `${"*a".repeat(30)}b`
+		const subject = "a".repeat(100000)
+		const start = performance.now()
+		const r1 = compileGlob(pattern).test(subject)
+		const elapsed = performance.now() - start
+		expect(r1).toBe(false)
+		expect(elapsed).toBeLessThan(50)
+		// Deterministic: same answer on a repeat run
+		expect(compileGlob(pattern).test(subject)).toBe(false)
+	})
+})
+
+// ─── Eager glob validation at compile time ──────────────────────────────────
+
+describe("eager glob validation in compileFilter", () => {
+	test("[z-a] raises ValidationError at compileFilter, not lazily during evaluate", () => {
+		expect(() => compileFilter("name GLOB '[z-a]'")).toThrow(ValidationError)
+	})
+
+	test("invalid pattern is not cached — every compile attempt throws", () => {
+		_clearFilterCache()
+		expect(() => compileFilter("name GLOB '[z-a]'")).toThrow(ValidationError)
+		expect(() => compileFilter("name GLOB '[z-a]'")).toThrow(ValidationError)
+	})
+
+	test("overly long glob raises at compileFilter", () => {
+		_clearFilterCache()
+		expect(() => compileFilter(`name GLOB '${"*".repeat(600)}'`)).toThrow(ValidationError)
+	})
+
+	test("negated GLOB with invalid class also raises eagerly", () => {
+		_clearFilterCache()
+		expect(() => compileFilter("NOT name GLOB '[9-0]'")).toThrow(ValidationError)
+	})
+
+	test("valid glob filters still compile and evaluate", () => {
+		_clearFilterCache()
+		const ast = compileFilter("name GLOB 'a[b-d]*'")
+		expect(evaluate(ast, { name: "ace" })).toBe(true)
+		expect(evaluate(ast, { name: "axe" })).toBe(false)
+	})
+})
+
+// ─── Tokenizer: bracket content validation ──────────────────────────────────
+
+describe("tokenizer rejects degenerate bracket groups", () => {
+	test("empty brackets are rejected", () => {
+		expect(() => tokenize("tags[]")).toThrow(ValidationError)
+		expect(() => tokenize("tags[]")).toThrow(/Empty array index/)
+	})
+
+	test("chained brackets are rejected", () => {
+		expect(() => tokenize("m[0][1]")).toThrow(ValidationError)
+		expect(() => tokenize("m[0][1]")).toThrow(/Chained array indexing/)
+		expect(() => tokenize("m[#-1][0]")).toThrow(ValidationError)
+	})
+
+	test("valid single bracket group still tokenizes", () => {
+		expect(tokenize("items[0].name")[0].value).toBe("items[0].name")
+	})
+})
+
+// ─── Empty-string coercion guard in looseEqual ──────────────────────────────
+
+describe("empty-string coercion guard", () => {
+	test("empty string no longer matches numeric 0", () => {
+		expect(evaluateFilter("count = ''", { count: 0 })).toBe(false)
+		expect(evaluateFilter("count = 0", { count: "" })).toBe(false)
+		// Same-type comparison unaffected
+		expect(evaluateFilter("count = ''", { count: "" })).toBe(true)
+		expect(evaluateFilter("count = 0", { count: 0 })).toBe(true)
+	})
+
+	test("whitespace-only string does not coerce to 0 either", () => {
+		expect(evaluateFilter("count = 0", { count: "   " })).toBe(false)
+	})
+
+	test("boolean false no longer matches numeric 0", () => {
+		expect(evaluateFilter("flag = false", { flag: 0 })).toBe(false)
+		expect(evaluateFilter("flag = 0", { flag: false })).toBe(false)
+	})
+
+	test("boolean true still matches its 1 / 'true' equivalents", () => {
+		expect(evaluateFilter("flag = true", { flag: true })).toBe(true)
+		expect(evaluateFilter("flag = true", { flag: 1 })).toBe(true)
+		expect(evaluateFilter("flag = true", { flag: "true" })).toBe(true)
+		expect(evaluateFilter("flag = false", { flag: false })).toBe(true)
+	})
+
+	test("non-empty numeric strings still coerce across types", () => {
+		expect(evaluateFilter("count = '5'", { count: 5 })).toBe(true)
+		expect(evaluateFilter("count = 5", { count: "5" })).toBe(true)
+		expect(evaluateFilter("count = '5.5'", { count: 5.5 })).toBe(true)
+		expect(evaluateFilter("count = '-3'", { count: -3 })).toBe(true)
 	})
 })

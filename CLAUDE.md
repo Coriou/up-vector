@@ -36,7 +36,7 @@ bun run typecheck        # tsc --noEmit
 ### Docker
 
 ```bash
-docker compose up -d                          # Production (up-vector + Redis Stack)
+docker compose up -d                          # Production (network-internal by design; Coolify/proxy fronts it — see README override for host access)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up  # Dev (watch mode, debug logs)
 ```
 
@@ -154,7 +154,7 @@ All prefixed `UPVECTOR_`:
 ## Implementation Status
 
 Phases 1-6 complete. Dense-vector CRUD + query + filtering + namespaces + production hardening + provider-backed `/upsert-data`/`/query-data`.
-383 tests passing (249 unit, 60 integration, 74 SDK compatibility).
+444 tests passing (310 unit, 60 integration, 74 SDK compatibility).
 Production hardening includes structured JSON logging, graceful shutdown, health probes, request timeouts, Prometheus metrics (optional scrape token), body limits, binary vector round-trip protection, Redis client self-heal, and process-level error handlers.
 See `PLAN.md` for the full architecture and phase breakdown.
 
