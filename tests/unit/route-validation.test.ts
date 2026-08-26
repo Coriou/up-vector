@@ -19,7 +19,15 @@ const fakeRedis = {
 	scan: (cursor: string) => scanImpl(cursor),
 }
 
-mock.module("../../src/redis", () => ({ getClient: () => fakeRedis }))
+mock.module("../../src/redis", () => ({
+	getClient: () => fakeRedis,
+	// Full export surface: these modules share the test process with files
+	// whose code statically binds other named exports from ../redis.
+	initRedis: async () => {},
+	isRedisHealthy: async () => true,
+	reinitRedis: async () => {},
+	closeRedis: async () => {},
+}))
 
 // Dynamic imports are required here: the route modules must be evaluated after
 // mock.module registers the redis stub, which static hoisting prevents.

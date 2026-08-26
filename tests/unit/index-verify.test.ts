@@ -10,6 +10,13 @@ mock.module("../../src/redis", () => ({
 	getClient: () => ({
 		send,
 	}),
+	// Mirror the real module's remaining exports: Bun 1.4 validates statically
+	// bound named exports against whatever this registry hands out, and other
+	// suites in the same process bind isRedisHealthy et al.
+	initRedis: async () => {},
+	isRedisHealthy: async () => true,
+	reinitRedis: async () => {},
+	closeRedis: async () => {},
 }))
 
 // Dynamic import: the module under test must bind the stubbed redis module.
