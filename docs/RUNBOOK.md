@@ -25,7 +25,7 @@ Verified baseline at runbook creation (2026-08-22): **383 tests** — 249 unit /
 
 | Mechanism | When | Watches | Failure signal |
 |---|---|---|---|
-| `test.yml` | push / PR touching code | our code vs pinned Bun 1.3.6 + Redis Stack `7.4.0-v8` | red CI on the PR |
+| `test.yml` | push / PR touching code | our code vs pinned Bun 1.4.0 + Redis Stack `7.4.0-v8` | red CI on the PR |
 | `compat.yml` | Mon 09:00 UTC | `@upstash/vector@latest` against us | issue labeled `sdk-compat` |
 | `maintenance.yml` | Mon 09:30 UTC | npm advisory DB, `bun@latest`, `redis-stack-server:latest`, Docker artifact | issues labeled `security` / `maintenance` |
 | `dependabot.yml` | weekly | bun deps, GitHub Actions pins, Dockerfile base image, compose Redis pin | PRs labeled `dependencies` |
