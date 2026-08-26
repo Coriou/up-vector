@@ -5,6 +5,7 @@ import { compileFilter, evaluate } from "../filter"
 import { getClient } from "../redis"
 import {
 	deleteKeysByPattern,
+	validateId,
 	validateNamespace,
 	validatePrefix,
 	vectorKey,
@@ -12,7 +13,6 @@ import {
 } from "../translate/keys"
 
 const MAX_SCAN_ITERATIONS = 10_000
-const MAX_ID_LENGTH = 1024
 
 const idSchema = z
 	.union([
@@ -20,8 +20,6 @@ const idSchema = z
 		z.number().refine((n) => Number.isFinite(n), "Vector ID must be a finite number"),
 	])
 	.transform(String)
-	.refine((s) => s.length > 0, "Vector ID must not be empty")
-	.refine((s) => s.length <= MAX_ID_LENGTH, `Vector ID must not exceed ${MAX_ID_LENGTH} characters`)
 
 const DeleteBody = z
 	.object({
@@ -40,6 +38,11 @@ export const deleteRoutes = new Hono()
 const handleDelete = async (c: Context) => {
 	const body = await c.req.json()
 	const parsed = DeleteBody.parse(body)
+	if (parsed.ids) {
+		// Delete paths share the write-path ID contract (update.ts) — empty ids,
+		// control characters, and over-length ids are rejected identically.
+		for (const id of parsed.ids) validateId(id)
+	}
 	const ns = c.req.param("namespace") ?? ""
 	validateNamespace(ns)
 	const redis = getClient()

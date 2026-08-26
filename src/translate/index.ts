@@ -111,33 +111,33 @@ async function createIndexInternal(ns: string, dimension: number, idx: string): 
 		// values. Without the metric check, restarting with a different
 		// UPVECTOR_METRIC against existing data silently normalizes scores
 		// with the wrong formula.
-		if (msg.includes("Index already exists")) {
-			try {
-				const info = await redis.send("FT.INFO", [idx])
-				const actualDim = parseDimensionFromInfo(info)
-				if (actualDim !== undefined) {
-					dimensionMap.set(ns, actualDim)
-					knownIndexes.add(idx)
-					validateIndexCompatibility(
-						ns,
-						actualDim,
-						parseMetricFromInfo(info),
-						dimension,
-						// FT.INFO reports the Redis-native name (L2/IP/COSINE);
-						// compare against what we would have created.
-						toRedisDistanceMetric(config.metric),
-					)
-					return
-				}
-			} catch (infoErr) {
-				// Bubble up validation mismatches; tolerate transient FT.INFO failures
-				if (infoErr instanceof ValidationError) {
-					throw infoErr
-				}
-			}
-		} else {
-			throw err
+		if (!msg.includes("Index already exists")) throw err
+
+		let info: unknown
+		try {
+			info = await redis.send("FT.INFO", [idx])
+		} catch (infoErr: unknown) {
+			const detail = infoErr instanceof Error ? infoErr.message : String(infoErr)
+			throw new Error(`Existing vector index "${idx}" could not be verified via FT.INFO: ${detail}`)
 		}
+		const actualDim = parseDimensionFromInfo(info)
+		if (actualDim === undefined) {
+			throw new Error(
+				`Existing vector index "${idx}" could not be verified via FT.INFO: no readable DIM attribute`,
+			)
+		}
+		dimensionMap.set(ns, actualDim)
+		knownIndexes.add(idx)
+		validateIndexCompatibility(
+			ns,
+			actualDim,
+			parseMetricFromInfo(info),
+			dimension,
+			// FT.INFO reports the Redis-native name (L2/IP/COSINE);
+			// compare against what we would have created.
+			toRedisDistanceMetric(config.metric),
+		)
+		return
 	}
 	knownIndexes.add(idx)
 	dimensionMap.set(ns, dimension)

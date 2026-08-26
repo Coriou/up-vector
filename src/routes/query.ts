@@ -8,7 +8,7 @@ import { getClient } from "../redis"
 import { loadDimension } from "../translate/index"
 import { indexName, parseVectorKey, validateNamespace } from "../translate/keys"
 import { normalizeScore } from "../translate/scores"
-import { decodeVectorBase64, encodeVector } from "../translate/vectors"
+import { decodeVectorBase64, encodeVector, finiteNumber } from "../translate/vectors"
 import type { QueryResult } from "../types"
 
 const OVER_FETCH_FACTOR = 3
@@ -18,10 +18,6 @@ const MAX_TOP_K = 1000
 const MAX_VECTOR_DIM = 16384
 const MAX_BATCH_QUERIES = 100
 const UnsupportedField = z.never().optional()
-
-const finiteNumber = z.number().refine((n) => Number.isFinite(n), {
-	message: "Vector values must be finite numbers (no NaN or Infinity)",
-})
 
 export const DenseQuerySchema = z.object({
 	vector: z

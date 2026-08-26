@@ -1,5 +1,6 @@
 import { type Context, Hono } from "hono"
 import { z } from "zod"
+import { ValidationError } from "../errors"
 import { getClient } from "../redis"
 import { parseVectorKey, validateNamespace, validatePrefix, vectorPrefix } from "../translate/keys"
 import { decodeVectorBase64 } from "../translate/vectors"
@@ -21,6 +22,44 @@ const RangeBody = z.object({
 
 const MAX_SCAN_ITERATIONS = 10_000
 
+/**
+ * Scans every key matching `pattern`, deduplicating SCAN results. Throws a
+ * ValidationError when the scan-iteration cap is exhausted before Redis
+ * returns cursor "0", so oversized namespaces fail loudly instead of
+ * presenting a truncated enumeration as complete.
+ */
+export async function collectScanKeys(
+	redis: ReturnType<typeof getClient>,
+	pattern: string,
+	maxIterations: number = MAX_SCAN_ITERATIONS,
+): Promise<Set<string>> {
+	let scanCursor = "0"
+	const collectedKeys = new Set<string>()
+	const seenKeys = new Set<string>()
+	let iterations = 0
+
+	do {
+		if (++iterations > maxIterations) {
+			throw new ValidationError(
+				`Namespace exceeds the scanable key limit (${maxIterations} SCAN iterations); range enumeration aborted`,
+			)
+		}
+		const result = await redis.scan(scanCursor, "MATCH", pattern, "COUNT", 100)
+		const [next, keys] = result as unknown as [string, string[]]
+
+		for (const key of keys) {
+			// SCAN can return duplicate keys across iterations — deduplicate
+			if (seenKeys.has(key)) continue
+			seenKeys.add(key)
+			collectedKeys.add(key)
+		}
+
+		scanCursor = next
+	} while (scanCursor !== "0")
+
+	return collectedKeys
+}
+
 export const rangeRoutes = new Hono()
 
 const handleRange = async (c: Context) => {
@@ -38,25 +77,7 @@ const handleRange = async (c: Context) => {
 	// Redis SCAN cursor. Scan the namespace, sort for stable paging, then slice by
 	// offset so the endpoint never returns more than `limit`.
 	const offset = parsed.cursor === "" ? 0 : Number(parsed.cursor)
-	let scanCursor = "0"
-	const collectedKeys = new Set<string>()
-	const seenKeys = new Set<string>()
-	let iterations = 0
-
-	do {
-		if (++iterations > MAX_SCAN_ITERATIONS) break
-		const result = await redis.scan(scanCursor, "MATCH", pattern, "COUNT", 100)
-		const [next, keys] = result as unknown as [string, string[]]
-
-		for (const key of keys) {
-			// SCAN can return duplicate keys across iterations — deduplicate
-			if (seenKeys.has(key)) continue
-			seenKeys.add(key)
-			collectedKeys.add(key)
-		}
-
-		scanCursor = next
-	} while (scanCursor !== "0")
+	const collectedKeys = await collectScanKeys(redis, pattern)
 
 	const pageKeys = Array.from(collectedKeys)
 		.sort()

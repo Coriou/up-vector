@@ -1,7 +1,23 @@
+import { z } from "zod"
+
 export function encodeVector(vec: number[]): Buffer {
 	const f32 = new Float32Array(vec)
 	return Buffer.from(f32.buffer, f32.byteOffset, f32.byteLength)
 }
+
+// Float32 max. Larger magnitudes survive JSON parsing as float64 but overflow
+// to Infinity inside encodeVector's Float32Array, then serialize back as JSON
+// null on read. Reject them here so clients get a clear validation error (400)
+// instead of silently corrupted storage.
+export const FLOAT32_MAX = 3.4028235e38
+
+export const finiteNumber = z
+	.number()
+	.refine((n) => Number.isFinite(n) && Math.abs(n) <= FLOAT32_MAX, {
+		message:
+			`Vector values must be finite numbers representable as Float32 ` +
+			`(no NaN or Infinity, absolute value must not exceed ${FLOAT32_MAX})`,
+	})
 
 // Bun.redis decodes all responses as UTF-8, which destroys bytes >= 0x80.
 // We store a base64 copy (_vec field) alongside the raw binary (vec field).

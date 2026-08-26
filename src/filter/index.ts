@@ -1,9 +1,9 @@
-import { evaluate } from "./evaluator"
+import { compileGlob, evaluate } from "./evaluator"
 import { parse } from "./parser"
 import { tokenize } from "./tokenizer"
 import type { FilterNode } from "./types"
 
-export { evaluate, globToRegex, resolveField } from "./evaluator"
+export { compileGlob, evaluate, resolveField } from "./evaluator"
 export { parse } from "./parser"
 export { tokenize } from "./tokenizer"
 export type { FilterNode, Token, TokenType, Value } from "./types"
@@ -23,12 +23,31 @@ export function compileFilter(filter: string): FilterNode {
 		return cached
 	}
 	const ast = parse(tokenize(filter))
+	validateGlobPatterns(ast)
 	if (filterAstCache.size >= FILTER_AST_CACHE_SIZE) {
 		const oldest = filterAstCache.keys().next().value
 		if (oldest !== undefined) filterAstCache.delete(oldest)
 	}
 	filterAstCache.set(filter, ast)
 	return ast
+}
+
+// Eagerly compile every GLOB pattern in the AST so malformed patterns (e.g.
+// out-of-order character classes) raise ValidationError at compile time.
+// Without this, the error surfaced lazily inside evaluate() where query and
+// delete consumers swallow it per-candidate — turning a bad filter into a
+// silent no-op ({result: []} / {deleted: 0} with HTTP 200).
+function validateGlobPatterns(node: FilterNode): void {
+	switch (node.type) {
+		case "and":
+		case "or":
+			validateGlobPatterns(node.left)
+			validateGlobPatterns(node.right)
+			break
+		case "glob":
+			compileGlob(node.pattern)
+			break
+	}
 }
 
 export function evaluateFilter(filter: string, metadata: Record<string, unknown>): boolean {
