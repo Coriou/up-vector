@@ -17,9 +17,11 @@ Principles:
 - Every automated signal lands as an issue with a stable label. No signal lives
   only in a log nobody reads.
 
-Verified baseline at runbook creation (2026-08-22): **383 tests** — 249 unit /
-60 integration / 74 SDK compatibility — green on Bun 1.3.6-pinned CI, local Bun
-1.3.14, Redis Stack `7.4.0-v8`, hono `4.13.3`.
+Verified baseline (2026-09-06, deep audit #2): **465 tests** — 331 unit /
+60 integration / 74 SDK compatibility — green on Bun 1.4.0-pinned CI, local
+Bun 1.3.14, Redis Stack `7.4.0-v8`, hono `4.13.3`, `bun audit` clean.
+History: 383 tests at runbook creation (2026-08-22); 444 after the 2026-08-22
+audit remediation wave.
 
 ## Automation inventory
 
@@ -85,33 +87,15 @@ Before tagging or publishing any release:
 
 ## Deep audit (the workflowz)
 
-Run quarterly, before notable releases, and after upstream majors (SDK, Bun,
-Redis Stack). Executed with the agent harness as a parallel fan-out; the
-procedure is deterministic and re-runnable. Past runs land in `docs/audits/`.
+The deterministic, re-runnable procedure lives in
+[`docs/workflows/deep-audit.md`](./workflows/deep-audit.md): finder
+dimensions and prompts, refuter rules (default-refute), synthesis and exit
+criteria, and the scope-guardrails list. Execute it with the agent harness
+as a parallel fan-out — or any agent runner, including a future scheduled CI
+job — exactly as written.
 
-1. **Finders (parallel, mutually blind)** — one agent per dimension:
-   - *protocol correctness*: Float32 little-endian round-trips, RESP3 shape
-     handling, score normalization per metric (COSINE / EUCLIDEAN /
-     DOT_PRODUCT), binary-safe Redis paths (`redis.send`)
-   - *security*: auth bypass vectors, injection through ids / namespaces /
-     filter strings, header handling, body-limit enforcement
-   - *resource safety*: topK / dimension bombs, timeout coverage, unbounded
-     over-fetch in filter evaluation, shutdown drain
-   - *parity*: `_ENDPOINTS` inventory of the installed `@upstash/vector` vs
-     `src/routes/*` vs the live Upstash REST docs — every endpoint must be
-     supported, explicitly rejected, or explicitly 501
-   - *concurrency & self-heal*: Redis client re-init, lazy `FT.CREATE` races,
-     graceful shutdown during in-flight writes
-   Each finder returns structured findings `{file, line, title, evidence,
-   severity}` — no vibes, citations required.
-2. **Refutation (parallel)** — one skeptic per finding, prompted to REFUTE,
-   defaulting to "refuted" when evidence is weak. A finding survives only with
-   concrete file/line evidence the skeptic cannot break.
-3. **Synthesis** — survivors are deduplicated, severity-ranked, and turned into
-   issues or immediate fixes. Disputed findings are reported as disputed, never
-   silently dropped.
-
-Scope guardrails for finders (things that look like bugs but are decisions):
-sparse/hybrid vectors are intentionally rejected; resumable query endpoints are
-intentionally 501; metadata filtering is intentionally app-level over-fetch in
-v1; score values approximate Upstash cloud but are not bit-identical.
+Cadence: quarterly, before notable releases, and after upstream majors (SDK,
+Bun, Redis Stack). Past runs land in `docs/audits/` — latest:
+[2026-09-06](./audits/2026-09-06-deep-audit.md) (17 raw findings, 12
+survivors, 8 fixed in-pass with regression tests, 3 open issues #22 #23
+#24, 5 refuted).
