@@ -923,7 +923,10 @@ describe("bounded glob matcher", () => {
 		const r1 = compileGlob(pattern).test(subject)
 		const elapsed = performance.now() - start
 		expect(r1).toBe(false)
-		expect(elapsed).toBeLessThan(50)
+		// The bound guards against catastrophic backtracking, which is orders of
+		// magnitude slower (seconds-to-minutes on 100k chars), not against slow
+		// hardware — keep it generous so CI runners with noisy clocks stay green.
+		expect(elapsed).toBeLessThan(2000)
 		// Deterministic: same answer on a repeat run
 		expect(compileGlob(pattern).test(subject)).toBe(false)
 	})

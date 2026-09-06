@@ -192,8 +192,12 @@ export async function syncIndexes(): Promise<void> {
 	}
 
 	for (const idx of indexes) {
-		knownIndexes.add(idx)
-		const ns = idx.startsWith("idx:") ? idx.slice(4) : idx
+		// FT._LIST is global to the Redis DB — a shared instance may hold indexes
+		// from other applications. Only our idx:{ns} indexes are ours to sync,
+		// validate, and cache; adopting foreign ones aborted startup on distance
+		// metric mismatches we don't own. (deep audit 2026-09-06, F1)
+		if (!idx.startsWith("idx:")) continue
+		const ns = idx.slice(4)
 		try {
 			const info = await redis.send("FT.INFO", [idx])
 			const dim = parseDimensionFromInfo(info)

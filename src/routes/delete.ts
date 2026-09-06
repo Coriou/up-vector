@@ -1,18 +1,20 @@
+import type { RedisClient } from "bun"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
+import { ValidationError } from "../errors"
 import type { FilterNode } from "../filter"
 import { compileFilter, evaluate } from "../filter"
 import { getClient } from "../redis"
 import {
 	deleteKeysByPattern,
+	escapeGlobMeta,
+	MAX_SCAN_ITERATIONS,
 	validateId,
 	validateNamespace,
 	validatePrefix,
 	vectorKey,
 	vectorPrefix,
 } from "../translate/keys"
-
-const MAX_SCAN_ITERATIONS = 10_000
 
 const idSchema = z
 	.union([
@@ -23,7 +25,7 @@ const idSchema = z
 
 const DeleteBody = z
 	.object({
-		ids: z.array(idSchema).max(1000, "Batch must not exceed 1000 ids").optional(),
+		ids: z.array(idSchema).optional(),
 		prefix: z.string().optional(),
 		// Empty filter strings used to silently fall through to the
 		// "nothing specified" branch and return `deleted: 0`. Reject explicitly.
@@ -60,7 +62,7 @@ const handleDelete = async (c: Context) => {
 	// Delete by prefix
 	if (parsed.prefix) {
 		validatePrefix(parsed.prefix)
-		const pattern = `${vectorPrefix(ns)}${parsed.prefix}*`
+		const pattern = `${vectorPrefix(ns)}${escapeGlobMeta(parsed.prefix)}*`
 		const deleted = await deleteKeysByPattern(pattern)
 		return c.json({ result: { deleted } })
 	}
@@ -77,7 +79,7 @@ const handleDelete = async (c: Context) => {
 }
 
 async function deleteByFilter(
-	redis: ReturnType<typeof getClient>,
+	redis: RedisClient,
 	pattern: string,
 	filter: string,
 ): Promise<number> {
@@ -89,7 +91,13 @@ async function deleteByFilter(
 	let iterations = 0
 
 	do {
-		if (++iterations > MAX_SCAN_ITERATIONS) break
+		if (++iterations > MAX_SCAN_ITERATIONS) {
+			// Loud like range.ts: a truncated filter delete that still reports
+			// success breaks erasure guarantees. (deep audit 2026-09-06, F3)
+			throw new ValidationError(
+				`Keyspace exceeds the scanable key limit (${MAX_SCAN_ITERATIONS} SCAN iterations); filter deletion aborted`,
+			)
+		}
 		const result = await redis.scan(cursor, "MATCH", pattern, "COUNT", 100)
 		const [next, keys] = result as unknown as [string, string[]]
 

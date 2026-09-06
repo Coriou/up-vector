@@ -3,7 +3,7 @@ import { getClient } from "../redis"
 
 export const NS_REGISTRY = "_ns_registry"
 export const EMBEDDING_NS_REGISTRY = "_embedding_ns_registry"
-const MAX_SCAN_ITERATIONS = 10_000
+export const MAX_SCAN_ITERATIONS = 10_000
 
 const MAX_NAMESPACE_LENGTH = 256
 const MAX_ID_LENGTH = 1024
@@ -48,20 +48,29 @@ export function validateId(id: string): void {
 /**
  * Validates a user-supplied id prefix used to build a SCAN MATCH pattern.
  *
- * Glob metacharacters are forbidden so a malicious prefix can't accidentally
- * match outside its intended subtree (e.g. `prefix: "*\\v:other:"`) or create
- * pathological patterns. Length is bounded to keep SCAN cursors small.
+ * Glob metacharacters are allowed for Upstash parity (Upstash treats prefix as
+ * a literal string, and ids may legally contain `* ? [ ] \`); the pattern
+ * builders escape them via escapeGlobMeta so they match literally instead of
+ * acting as wildcards. Control characters are still rejected and length is
+ * bounded to keep SCAN cursors small. (deep audit 2026-09-06, F11)
  */
 export function validatePrefix(prefix: string): void {
 	if (CONTROL_CHARS.test(prefix)) {
 		throw new ValidationError("Prefix must not contain control characters")
 	}
-	if (GLOB_META.test(prefix)) {
-		throw new ValidationError("Prefix must not contain glob characters (* ? [ ] \\)")
-	}
 	if (prefix.length > MAX_PREFIX_LENGTH) {
 		throw new ValidationError(`Prefix must not exceed ${MAX_PREFIX_LENGTH} characters`)
 	}
+}
+
+/**
+ * Escapes Redis glob metacharacters so a user prefix matches literally inside
+ * a SCAN MATCH pattern. Namespaces are validated glob-free, so escaping the
+ * prefix alone is enough to keep every pattern anchored to its namespace
+ * subtree.
+ */
+export function escapeGlobMeta(value: string): string {
+	return value.replace(/[*?[\]\\]/g, (ch) => `\\${ch}`)
 }
 
 export function vectorKey(ns: string, id: string): string {
@@ -97,7 +106,14 @@ export async function deleteKeysByPattern(pattern: string): Promise<number> {
 	const seen = new Set<string>()
 	let iterations = 0
 	do {
-		if (++iterations > MAX_SCAN_ITERATIONS) break
+		if (++iterations > MAX_SCAN_ITERATIONS) {
+			// Fail loudly like range.ts collectScanKeys: a truncated enumeration
+			// presented as success let /reset and /delete claim completion while
+			// matching keys survived. (deep audit 2026-09-06, F3)
+			throw new ValidationError(
+				`Keyspace exceeds the scanable key limit (${MAX_SCAN_ITERATIONS} SCAN iterations); deletion aborted`,
+			)
+		}
 		const result = await redis.scan(cursor, "MATCH", pattern, "COUNT", 100)
 		const [next, keys] = result as unknown as [string, string[]]
 		// SCAN can return duplicate keys across iterations — deduplicate

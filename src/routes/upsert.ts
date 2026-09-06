@@ -19,9 +19,11 @@ const idSchema = z
 const MAX_VECTOR_DIM = 16384
 // Parity with /upsert-data's data cap (data.ts MAX_DATA_LENGTH), plus a byte
 // budget on serialized metadata so Redis hash values stay bounded regardless
-// of entry point.
-const MAX_DATA_LENGTH = 1_000_000
-const MAX_METADATA_BYTES = 131072
+// of entry point. Exported so /update and /upsert-data enforce the same
+// budgets — an uncapped /update write made the "regardless of entry point"
+// claim false. (deep audit 2026-09-06, F4)
+export const MAX_DATA_LENGTH = 1_000_000
+export const MAX_METADATA_BYTES = 131072
 
 const UnsupportedField = z.never().optional()
 

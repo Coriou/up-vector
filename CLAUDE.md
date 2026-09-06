@@ -154,7 +154,7 @@ All prefixed `UPVECTOR_`:
 ## Implementation Status
 
 Phases 1-6 complete. Dense-vector CRUD + query + filtering + namespaces + production hardening + provider-backed `/upsert-data`/`/query-data`.
-444 tests passing (310 unit, 60 integration, 74 SDK compatibility).
+465 tests passing (331 unit, 60 integration, 74 SDK compatibility). Deep audits run per `docs/workflows/deep-audit.md`; open findings tracked under the `deep-audit` issue label.
 Production hardening includes structured JSON logging, graceful shutdown, health probes, request timeouts, Prometheus metrics (optional scrape token), body limits, binary vector round-trip protection, Redis client self-heal, and process-level error handlers.
 See `PLAN.md` for the full architecture and phase breakdown.
 

@@ -110,9 +110,20 @@ export async function executeQuery(ns: string, query: DenseQuery): Promise<Query
 		"LIMIT",
 		"0",
 		String(fetchCount),
-		"DIALECT",
-		"2",
 	]
+	// Project only the fields the response needs. Without RETURN, every KNN
+	// candidate ships its full hash — _vec base64, metadata (≤128KB), data
+	// (≤1MB) — even when include* flags are false; at topK=1000 that pulled
+	// ~1GB through the RESP3 parser just to trim to topK. NOCONTENT alone is
+	// not an option: the parser reads _score from returned attributes.
+	// (deep audit 2026-09-06, F6)
+	const needsMetadata = filterAst !== undefined || query.includeMetadata
+	const returnFields = ["_score"]
+	if (needsMetadata) returnFields.push("metadata")
+	if (query.includeVectors) returnFields.push("_vec")
+	if (query.includeData) returnFields.push("data")
+	args.push("RETURN", String(returnFields.length), ...returnFields)
+	args.push("DIALECT", "2")
 
 	let searchResult: unknown
 	try {
@@ -129,7 +140,6 @@ export async function executeQuery(ns: string, query: DenseQuery): Promise<Query
 
 	// Parse FT.SEARCH response. We only need to JSON.parse the metadata when the
 	// caller actually uses it (filter or includeMetadata) — skip the work otherwise.
-	const needsMetadata = filterAst !== undefined || query.includeMetadata
 	const candidates = parseFtSearchResponse(searchResult, needsMetadata)
 
 	// Apply filter + normalize scores + trim to topK.
