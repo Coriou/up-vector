@@ -1,6 +1,7 @@
 import { config } from "./config"
 import { EmbeddingProviderError, ValidationError } from "./errors"
 import { log } from "./logger"
+import { FLOAT32_MAX } from "./translate/vectors"
 
 export type EmbeddingProvider = {
 	readonly name: string
@@ -371,7 +372,7 @@ export function validateConfiguredDimension(
 	}
 }
 
-function parseEmbedding(value: unknown): number[] {
+export function parseEmbedding(value: unknown): number[] {
 	if (!Array.isArray(value)) {
 		throw new EmbeddingProviderError("Embedding provider returned a malformed embedding", 502)
 	}
@@ -379,6 +380,17 @@ function parseEmbedding(value: unknown): number[] {
 		if (typeof entry !== "number" || !Number.isFinite(entry)) {
 			throw new EmbeddingProviderError(
 				"Embedding provider returned a non-finite embedding value",
+				502,
+			)
+		}
+		// 1e39-style float64 values pass the finite check but overflow to Infinity
+		// inside Float32Array encoding — the exact silent corruption /upsert
+		// rejects with 400. Provider output must meet the same bar; fail with 502
+		// so the provider contract, not stored data, absorbs the fault.
+		// (deep audit 2026-09-06, F2)
+		if (Math.abs(entry) > FLOAT32_MAX) {
+			throw new EmbeddingProviderError(
+				"Embedding provider returned a value exceeding Float32 range",
 				502,
 			)
 		}

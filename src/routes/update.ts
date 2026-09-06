@@ -7,6 +7,7 @@ import { getClient } from "../redis"
 import { loadDimension } from "../translate/index"
 import { EMBEDDING_NS_REGISTRY, validateId, validateNamespace, vectorKey } from "../translate/keys"
 import { encodeVector, encodeVectorBase64, finiteNumber } from "../translate/vectors"
+import { MAX_DATA_LENGTH, MAX_METADATA_BYTES } from "./upsert"
 
 // Numeric IDs that aren't finite would silently become "NaN" / "Infinity"
 // strings after the .transform(String) below — reject them up front so users
@@ -29,8 +30,21 @@ const UpdateBody = z.object({
 		.max(MAX_VECTOR_DIM, `Vector dimension must not exceed ${MAX_VECTOR_DIM}`)
 		.optional(),
 	sparseVector: UnsupportedField,
-	metadata: z.record(z.string(), z.unknown()).optional(),
-	data: z.string().optional(),
+	// Same budgets as /upsert (VectorSchema) — an /update write bypassing the
+	// cap let a single request persist ~32MiB of metadata/data that every
+	// includeMetadata/includeData read then retransfers.
+	// (deep audit 2026-09-06, F4)
+	metadata: z
+		.record(z.string(), z.unknown())
+		.optional()
+		.refine(
+			(m) => m === undefined || Buffer.byteLength(JSON.stringify(m), "utf8") <= MAX_METADATA_BYTES,
+			`Serialized metadata must not exceed ${MAX_METADATA_BYTES} bytes`,
+		),
+	data: z
+		.string()
+		.max(MAX_DATA_LENGTH, `Data must not exceed ${MAX_DATA_LENGTH} characters`)
+		.optional(),
 	metadataUpdateMode: z.enum(["OVERWRITE", "PATCH"]).default("OVERWRITE"),
 })
 

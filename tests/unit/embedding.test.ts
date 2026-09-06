@@ -3,6 +3,7 @@ import {
 	DisabledEmbeddingProvider,
 	FakeEmbeddingProvider,
 	OpenAICompatibleEmbeddingProvider,
+	parseEmbedding,
 	validateConfiguredDimension,
 } from "../../src/embedding"
 import { EmbeddingProviderError, ValidationError } from "../../src/errors"
@@ -168,5 +169,29 @@ describe("OpenAICompatibleEmbeddingProvider", () => {
 		})
 
 		await expect(provider.embedMany(["hello"])).rejects.toBeInstanceOf(EmbeddingProviderError)
+	})
+})
+
+describe("parseEmbedding Float32 bound", () => {
+	// Provider output flows straight into Float32Array encoding; a float64 value
+	// past FLOAT32_MAX silently became an Infinity blob with HTTP 200 — the
+	// exact corruption /upsert rejects with 400. Provider paths must fail with
+	// 502 instead. (deep audit 2026-09-06, F2)
+	test("rejects values past Float32 range with a 502 provider error", () => {
+		expect(() => parseEmbedding([1e39])).toThrow(EmbeddingProviderError)
+		try {
+			parseEmbedding([1e39])
+		} catch (err) {
+			expect((err as EmbeddingProviderError).status).toBe(502)
+			expect((err as Error).message).toContain("Float32")
+		}
+	})
+
+	test("rejects negative overflow", () => {
+		expect(() => parseEmbedding([-1e39])).toThrow(EmbeddingProviderError)
+	})
+
+	test("accepts the Float32 boundary value", () => {
+		expect(parseEmbedding([3.4028235e38, -3.4028235e38])).toEqual([3.4028235e38, -3.4028235e38])
 	})
 })

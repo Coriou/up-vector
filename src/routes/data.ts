@@ -5,7 +5,7 @@ import { EmbeddingProviderError } from "../errors"
 import { getClient } from "../redis"
 import { EMBEDDING_NS_REGISTRY, validateNamespace } from "../translate/keys"
 import { type DenseQuery, executeQuery } from "./query"
-import { upsertDenseVectors } from "./upsert"
+import { MAX_METADATA_BYTES, upsertDenseVectors } from "./upsert"
 
 const MAX_BATCH_SIZE = 1000
 const MAX_BATCH_QUERIES = 100
@@ -28,7 +28,13 @@ const dataSchema = z
 const UpsertDataItem = z.object({
 	id: idSchema,
 	data: dataSchema,
-	metadata: z.record(z.string(), z.unknown()).optional(),
+	metadata: z
+		.record(z.string(), z.unknown())
+		.optional()
+		.refine(
+			(m) => m === undefined || Buffer.byteLength(JSON.stringify(m), "utf8") <= MAX_METADATA_BYTES,
+			`Serialized metadata must not exceed ${MAX_METADATA_BYTES} bytes`,
+		),
 	vector: UnsupportedField,
 	sparseVector: UnsupportedField,
 })
