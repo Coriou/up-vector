@@ -16,7 +16,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"hono": "^4.13.3",
+		"hono": "^4.13.13",
 		"zod": "^4.4.3"
 	},
 	"devDependencies": {
