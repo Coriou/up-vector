@@ -1,11 +1,15 @@
 import { type Context, Hono } from "hono"
 import { z } from "zod"
+import { ValidationError } from "../errors"
 import { getClient } from "../redis"
-import { parseVectorKey, validateNamespace, vectorPrefix } from "../translate/keys"
+import {
+	MAX_SCAN_ITERATIONS,
+	parseVectorKey,
+	validateNamespace,
+	vectorPrefix,
+} from "../translate/keys"
 import { decodeVectorBase64 } from "../translate/vectors"
 import type { Vector } from "../types"
-
-const MAX_SCAN_ITERATIONS = 10_000
 
 const RandomBody = z.object({
 	includeMetadata: z.boolean().default(false),
@@ -76,7 +80,13 @@ const handleRandom = async (c: Context) => {
 	// Reservoir sample over the namespace so every matching key has equal
 	// probability without materializing the full namespace in memory.
 	do {
-		if (++iterations > MAX_SCAN_ITERATIONS) break
+		if (++iterations > MAX_SCAN_ITERATIONS) {
+			// Loud like range.ts: a truncated sweep silently biases the sample
+			// toward early keys instead of a uniform draw. (deep audit 2026-09-06, F3)
+			throw new ValidationError(
+				`Keyspace exceeds the scanable key limit (${MAX_SCAN_ITERATIONS} SCAN iterations); random sampling aborted`,
+			)
+		}
 		const result = await redis.scan(cursor, "MATCH", pattern, "COUNT", 100)
 		const [next, keys] = result as unknown as [string, string[]]
 
@@ -94,11 +104,15 @@ const handleRandom = async (c: Context) => {
 		return c.json({ result: null })
 	}
 
-	const hash = await redis.hgetall(selectedKey)
-	if (!hash || Object.keys(hash).length === 0) {
-		return c.json({ result: null })
+	// All three fields fetched unconditionally: the emptiness guard below needs
+	// the full picture, and this is a single key. (deep audit 2026-09-06, F8)
+	const fieldNames = ["_vec", "metadata", "data"]
+	const values = (await redis.hmget(selectedKey, ...fieldNames)) as (string | null)[]
+	const hash: Record<string, string> = {}
+	for (let i = 0; i < fieldNames.length; i++) {
+		const value = values[i]
+		if (value !== null && value !== undefined) hash[fieldNames[i]] = value
 	}
-
 	// Need at least one stored field; empty hash already handled. If vectors
 	// are omitted by flag, still return id (+ optional metadata/data).
 	if (!hash._vec && !hash.metadata && hash.data === undefined) {
@@ -106,7 +120,7 @@ const handleRandom = async (c: Context) => {
 	}
 
 	const parsedKey = parseVectorKey(selectedKey)
-	const id = parsedKey?.id ?? hash.id ?? selectedKey
+	const id = parsedKey?.id ?? selectedKey
 	return c.json({ result: buildRandomVector(hash, id, opts) })
 }
 

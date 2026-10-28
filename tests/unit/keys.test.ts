@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { ValidationError } from "../../src/errors"
 import {
+	escapeGlobMeta,
 	indexName,
 	NS_REGISTRY,
 	parseVectorKey,
@@ -163,11 +164,15 @@ describe("validatePrefix", () => {
 		expect(() => validatePrefix("")).not.toThrow()
 	})
 
-	test("rejects glob metacharacters that would escape the namespace subtree", () => {
-		expect(() => validatePrefix("foo*")).toThrow("glob characters")
-		expect(() => validatePrefix("foo?")).toThrow("glob characters")
-		expect(() => validatePrefix("foo[bar]")).toThrow("glob characters")
-		expect(() => validatePrefix("foo\\bar")).toThrow("glob characters")
+	test("accepts glob metacharacters — pattern builders escape them (Upstash parity)", () => {
+		// Upstash treats prefix as a literal string and ids may contain
+		// `* ? [ ] \`, so a prefix like "doc[1" must not 400; escapeGlobMeta
+		// neutralizes the metacharacters when the SCAN pattern is built.
+		// (deep audit 2026-09-06, F11)
+		expect(() => validatePrefix("foo*")).not.toThrow()
+		expect(() => validatePrefix("foo?")).not.toThrow()
+		expect(() => validatePrefix("foo[bar]")).not.toThrow()
+		expect(() => validatePrefix("foo\\bar")).not.toThrow()
 	})
 
 	test("rejects control characters", () => {
@@ -203,10 +208,20 @@ describe("validators throw ValidationError (typed)", () => {
 
 	test("validatePrefix throws ValidationError", () => {
 		try {
-			validatePrefix("a*")
+			validatePrefix("a\nb")
 			throw new Error("expected throw")
 		} catch (err) {
 			expect(err).toBeInstanceOf(ValidationError)
 		}
+	})
+})
+
+describe("escapeGlobMeta", () => {
+	test("escapes every glob metacharacter", () => {
+		expect(escapeGlobMeta("doc[1]*?\\")).toBe("doc\\[1\\]\\*\\?\\\\")
+	})
+
+	test("leaves plain prefixes untouched", () => {
+		expect(escapeGlobMeta("doc-42:")).toBe("doc-42:")
 	})
 })

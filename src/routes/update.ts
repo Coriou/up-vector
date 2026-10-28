@@ -7,6 +7,7 @@ import { getClient } from "../redis"
 import { loadDimension } from "../translate/index"
 import { EMBEDDING_NS_REGISTRY, validateId, validateNamespace, vectorKey } from "../translate/keys"
 import { encodeVector, encodeVectorBase64, finiteNumber } from "../translate/vectors"
+import { MAX_DATA_LENGTH, MAX_METADATA_BYTES } from "./upsert"
 
 // Numeric IDs that aren't finite would silently become "NaN" / "Infinity"
 // strings after the .transform(String) below — reject them up front so users
@@ -29,8 +30,21 @@ const UpdateBody = z.object({
 		.max(MAX_VECTOR_DIM, `Vector dimension must not exceed ${MAX_VECTOR_DIM}`)
 		.optional(),
 	sparseVector: UnsupportedField,
-	metadata: z.record(z.string(), z.unknown()).optional(),
-	data: z.string().optional(),
+	// Same budgets as /upsert (VectorSchema) — an /update write bypassing the
+	// cap let a single request persist ~32MiB of metadata/data that every
+	// includeMetadata/includeData read then retransfers.
+	// (deep audit 2026-09-06, F4)
+	metadata: z
+		.record(z.string(), z.unknown())
+		.optional()
+		.refine(
+			(m) => m === undefined || Buffer.byteLength(JSON.stringify(m), "utf8") <= MAX_METADATA_BYTES,
+			`Serialized metadata must not exceed ${MAX_METADATA_BYTES} bytes`,
+		),
+	data: z
+		.string()
+		.max(MAX_DATA_LENGTH, `Data must not exceed ${MAX_DATA_LENGTH} characters`)
+		.optional(),
 	metadataUpdateMode: z.enum(["OVERWRITE", "PATCH"]).default("OVERWRITE"),
 })
 
@@ -87,18 +101,11 @@ if redis.call('EXISTS', KEYS[1]) == 0 then
 end
 local patch_mode = ARGV[1]
 local patch_json = ARGV[2]
-local has_pairs = #ARGV > 2
-if has_pairs then
-  local pairs_args = {}
-  for i = 3, #ARGV do
-    pairs_args[#pairs_args + 1] = ARGV[i]
-  end
-  redis.call('HSET', KEYS[1], unpack(pairs_args))
-end
+local merged
 if patch_mode == '1' then
   local existing = redis.call('HGET', KEYS[1], 'metadata')
   local ok_patch, patch = pcall(cjson.decode, patch_json)
-  local merged = patch_json
+  merged = patch_json
   if ok_patch and existing then
     local ok, base = pcall(cjson.decode, existing)
     if ok then
@@ -107,6 +114,19 @@ if patch_mode == '1' then
   elseif ok_patch then
     merged = cjson.encode(merge_patch({}, patch))
   end
+  if #merged > ${MAX_METADATA_BYTES} then
+    return -1
+  end
+end
+local has_pairs = #ARGV > 2
+if has_pairs then
+  local pairs_args = {}
+  for i = 3, #ARGV do
+    pairs_args[#pairs_args + 1] = ARGV[i]
+  end
+  redis.call('HSET', KEYS[1], unpack(pairs_args))
+end
+if merged then
   redis.call('HSET', KEYS[1], 'metadata', merged)
 end
 return 1
@@ -173,6 +193,9 @@ updateRoutes.post("/update/:namespace?", async (c) => {
 	]
 
 	const result = (await redis.send("EVAL", evalArgs as string[])) as number
+	if (result === -1) {
+		throw new ValidationError(`Merged metadata must not exceed ${MAX_METADATA_BYTES} bytes`)
+	}
 	return c.json({ result: { updated: result === 1 ? 1 : 0 } })
 })
 

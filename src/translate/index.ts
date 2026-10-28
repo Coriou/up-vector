@@ -35,11 +35,17 @@ export async function loadDimension(ns: string): Promise<number | undefined> {
 		const info = await redis.send("FT.INFO", [idx])
 		const dim = parseDimensionFromInfo(info)
 		if (dim !== undefined) {
-			dimensionMap.set(ns, dim)
-			knownIndexes.add(idx)
 			// Metric is process-wide config; dimension is being discovered
 			// here, so only metric compatibility is checkable at this boundary.
-			validateIndexCompatibility(ns, dim, parseMetricFromInfo(info), undefined, config.metric)
+			validateIndexCompatibility(
+				ns,
+				dim,
+				parseMetricFromInfo(info),
+				config.dimension,
+				toRedisDistanceMetric(config.metric),
+			)
+			dimensionMap.set(ns, dim)
+			knownIndexes.add(idx)
 			return dim
 		}
 	} catch (err) {
@@ -126,8 +132,6 @@ async function createIndexInternal(ns: string, dimension: number, idx: string): 
 				`Existing vector index "${idx}" could not be verified via FT.INFO: no readable DIM attribute`,
 			)
 		}
-		dimensionMap.set(ns, actualDim)
-		knownIndexes.add(idx)
 		validateIndexCompatibility(
 			ns,
 			actualDim,
@@ -137,6 +141,8 @@ async function createIndexInternal(ns: string, dimension: number, idx: string): 
 			// compare against what we would have created.
 			toRedisDistanceMetric(config.metric),
 		)
+		dimensionMap.set(ns, actualDim)
+		knownIndexes.add(idx)
 		return
 	}
 	knownIndexes.add(idx)
@@ -192,15 +198,26 @@ export async function syncIndexes(): Promise<void> {
 	}
 
 	for (const idx of indexes) {
-		knownIndexes.add(idx)
-		const ns = idx.startsWith("idx:") ? idx.slice(4) : idx
+		// FT._LIST is global to the Redis DB — a shared instance may hold indexes
+		// from other applications. Only our idx:{ns} indexes are ours to sync,
+		// validate, and cache; adopting foreign ones aborted startup on distance
+		// metric mismatches we don't own. (deep audit 2026-09-06, F1)
+		if (!idx.startsWith("idx:")) continue
+		const ns = idx.slice(4)
 		try {
 			const info = await redis.send("FT.INFO", [idx])
 			const dim = parseDimensionFromInfo(info)
+			validateIndexCompatibility(
+				ns,
+				dim,
+				parseMetricFromInfo(info),
+				config.dimension,
+				toRedisDistanceMetric(config.metric),
+			)
 			if (dim !== undefined) {
 				dimensionMap.set(ns, dim)
+				knownIndexes.add(idx)
 			}
-			validateIndexCompatibility(ns, dim, parseMetricFromInfo(info), undefined, config.metric)
 		} catch (err) {
 			// Index may have been dropped between _LIST and INFO; a
 			// compatibility mismatch aborts startup instead of mis-scoring

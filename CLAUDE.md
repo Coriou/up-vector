@@ -13,7 +13,7 @@ Sibling project to [up-redis](https://github.com/Coriou/up-redis) (same idea, bu
 - **Validation:** Zod v4
 - **Linting/Format:** Biome v2
 - **Testing:** `bun test` (built-in, Jest-compatible)
-- **Container:** Docker (oven/bun:1.4-alpine) + Redis Stack (pinned `7.4.0-v8`)
+- **Container:** Docker (oven/bun:1.4.4-alpine) + Redis Stack (pinned `7.4.0-v8`)
 
 **Not a Next.js/Vercel project.** Pure backend service.
 
@@ -24,7 +24,8 @@ bun install              # Install dependencies
 bun run dev              # Dev server with --watch
 bun run start            # Production start
 bun run build            # Bundle to dist/index.js
-bun test                 # All tests
+./scripts/test-all.sh    # Full isolated Redis-backed gate + build
+bun test                 # Tests only (requires a running server/Redis for integration)
 bun test tests/unit      # Unit tests only
 bun test tests/integration  # Integration tests (needs Redis Stack)
 bun run lint             # Biome check
@@ -154,7 +155,7 @@ All prefixed `UPVECTOR_`:
 ## Implementation Status
 
 Phases 1-6 complete. Dense-vector CRUD + query + filtering + namespaces + production hardening + provider-backed `/upsert-data`/`/query-data`.
-444 tests passing (310 unit, 60 integration, 74 SDK compatibility).
+475 tests passing (340 unit, 61 integration, 74 SDK compatibility), verified 2026-10-28 with Bun 1.4.4 and SDK 1.2.3 (latest). Deep audits run per `docs/workflows/deep-audit.md`; open findings tracked under the `deep-audit` issue label.
 Production hardening includes structured JSON logging, graceful shutdown, health probes, request timeouts, Prometheus metrics (optional scrape token), body limits, binary vector round-trip protection, Redis client self-heal, and process-level error handlers.
 See `PLAN.md` for the full architecture and phase breakdown.
 

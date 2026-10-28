@@ -6,6 +6,7 @@ import { dropIndex, ensureIndex, loadDimension } from "../translate/index"
 import {
 	deleteKeysByPattern,
 	EMBEDDING_NS_REGISTRY,
+	MAX_SCAN_ITERATIONS,
 	NS_REGISTRY,
 	parseVectorKey,
 	validateNamespace,
@@ -50,8 +51,6 @@ const RenameNamespaceBody = z.object({
 	newNamespace: z.string(),
 	deleteExisting: z.boolean().default(false),
 })
-
-const MAX_SCAN_ITERATIONS = 10_000
 
 namespaceRoutes.post("/rename-namespace", async (c) => {
 	const body = await c.req.json()
@@ -132,7 +131,13 @@ async function scanKeys(pattern: string, limit = Number.POSITIVE_INFINITY): Prom
 	let iterations = 0
 
 	do {
-		if (++iterations > MAX_SCAN_ITERATIONS) break
+		if (++iterations > MAX_SCAN_ITERATIONS) {
+			// Loud like range.ts: a truncated enumeration reported a rename or
+			// existence verdict as complete. (deep audit 2026-09-06, F3)
+			throw new ValidationError(
+				`Keyspace exceeds the scanable key limit (${MAX_SCAN_ITERATIONS} SCAN iterations); namespace enumeration aborted`,
+			)
+		}
 		const result = await redis.scan(cursor, "MATCH", pattern, "COUNT", 100)
 		const [next, batch] = result as unknown as [string, string[]]
 		for (const key of batch) {

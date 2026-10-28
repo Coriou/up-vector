@@ -147,16 +147,16 @@ curl -X POST http://localhost:8080/query-data \
 
 ## API Compatibility
 
-Implements the dense-vector subset of the [Upstash Vector REST API](https://upstash.com/docs/vector/api/endpoints), plus dense `/upsert-data` and `/query-data` through a configurable embedding provider. Validated by 383 tests including 74 using the real `@upstash/vector` SDK.
+Implements the dense-vector subset of the [Upstash Vector REST API](https://upstash.com/docs/vector/api/endpoints), plus dense `/upsert-data` and `/query-data` through a configurable embedding provider. Validated by 475 tests including 74 using the real `@upstash/vector` SDK.
 
 | Surface | Status | Notes |
 |----------|--------|-------|
 | Dense `POST /upsert[/{namespace}]` | Supported | Dense vectors, metadata, optional `data`; re-upsert replaces omitted metadata/data |
-| Dense `POST /query[/{namespace}]` | Supported | KNN + metadata filtering; batch query supported |
+| Dense `POST /query[/{namespace}]` | Supported | KNN + metadata filtering; batch query supported (up to 100 queries — also applies to `/query-data`) |
 | `POST /upsert-data[/{namespace}]` | Supported | Dense only; requires `UPVECTOR_EMBEDDING_PROVIDER`; stores raw text as `data` |
 | `POST /query-data[/{namespace}]` | Supported | Dense only; requires `UPVECTOR_EMBEDDING_PROVIDER`; same result shape as `/query` |
-| `GET/POST /fetch[/{namespace}]` | Supported | IDs and prefix; include metadata/vectors/data |
-| `DELETE/POST /delete[/{namespace}]` | Supported | IDs, prefix, or filter |
+| `GET/POST /fetch[/{namespace}]` | Supported | IDs (up to 1000 per request) and prefix (first 1000 results); include metadata/vectors/data |
+| `DELETE/POST /delete[/{namespace}]` | Supported | IDs (up to 1000 per request), prefix, or filter |
 | `POST /update[/{namespace}]` | Supported | Dense vector, data, OVERWRITE and PATCH metadata |
 | `GET/POST /range[/{namespace}]` | Supported | Offset cursor pagination |
 | `GET/POST /random[/{namespace}]` | Supported | Returns one random dense vector or `null` |
@@ -166,6 +166,7 @@ Implements the dense-vector subset of the [Upstash Vector REST API](https://upst
 | Sparse indexes and sparse vectors | Unsupported | Requests with `sparseVector` are rejected; see [sparse/hybrid architecture](./docs/architecture/sparse-hybrid.md) |
 | Hybrid indexes and fusion/query modes | Unsupported | No dense+sparse fusion yet |
 | Resumable query endpoints | Unsupported | Return explicit `501`; no cursor/session parity |
+| Empty `filter` strings | Intentional deviation | Upstash documents `filter: ""` as "no filter"; up-vector rejects it with `400` (almost always a client bug — dynamic filter builders producing `""`). Pass `filter` as `undefined` for unfiltered queries |
 | Upstash-hosted embedding models | Partial | OpenAI-compatible self-host/provider path only, not Upstash's hosted model catalog |
 
 ### Metadata Filtering
@@ -301,12 +302,12 @@ bun run typecheck        # TypeScript check
 
 ### Testing
 
-383 tests across three tiers:
+475 tests across three tiers:
 
 | Tier | Tests | Purpose |
 |------|-------|---------|
-| **Unit** | 249 | Filter parser, embedding providers, vector encode/decode, score normalization, key naming, middleware/config hardening |
-| **Integration** | 60 | End-to-end REST behavior against Redis Stack, including raw-text data endpoints |
+| **Unit** | 340 | Filter parser, embedding providers, vector encode/decode, score normalization, key naming, middleware/config hardening, route validation |
+| **Integration** | 61 | End-to-end REST behavior against Redis Stack, including raw-text data endpoints |
 | **SDK Compatibility** | 74 | Real `@upstash/vector` SDK against up-vector |
 
 ```bash
@@ -314,6 +315,10 @@ bun run typecheck        # TypeScript check
 ```
 
 The test script honors `UPVECTOR_REDIS_PORT` and `UPVECTOR_PORT`, and otherwise chooses free local ports before starting Redis/server.
+
+The local gate uses an isolated Compose project and disposable Redis volume, probes readiness, and removes only its own resources. Run `docker build -t up-vector:smoke . && ./scripts/docker-smoke.sh` to verify the production artifact (health, auth, upsert, and indexed query assertions). CI runs this smoke test on code PRs and weekly.
+
+Maintenance verified on 2026-10-28: Bun 1.4.4, Redis Stack `7.4.0-v8` (Redis 7.4.7), `@upstash/vector` 1.2.3 (registry latest). See [the dated audit](docs/audits/2026-10-28-maintenance.md) for dependency/security results and outstanding risks. Explicit-ID fetch/delete requests are capped at 1000 IDs for resource safety; split larger requests into batches.
 
 The compatibility tests are the ultimate validation — they use the actual `@upstash/vector` TypeScript SDK, exercising the exact HTTP paths and request formats that production apps use. A weekly CI job also tests against the latest SDK version to catch incompatibilities early.
 

@@ -72,6 +72,12 @@ const handleReset = async (c: Context) => {
 			}
 		}
 
+		// All namespaces were attempted, but partial cleanup is never Success.
+		const failure = [...dropResults, ...deleteResults].find(
+			(result) => result.status === "rejected",
+		)
+		if (failure?.status === "rejected") throw failure.reason
+
 		// Keep the namespace registry intact: Upstash reset empties namespaces but
 		// does not delete them. The embedding-mode registry is cleared because
 		// up-vector lets a reset namespace be reused either through dense vectors

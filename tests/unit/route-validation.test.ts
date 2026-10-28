@@ -12,11 +12,22 @@ let scanImpl: (cursor: string) => Promise<[string, string[]]> = async () => {
 const delCalls: string[][] = []
 const fakeRedis = {
 	hgetall: async () => ({}),
+	hget: async () => null,
+	exists: async () => 1,
+	hmget: async () => [null, null, null],
 	del: async (...keys: string[]) => {
 		delCalls.push(keys)
 		return keys.length
 	},
 	scan: (cursor: string) => scanImpl(cursor),
+	// FT.DROPINDEX during reset: missing-index wording so dropIndex swallows it
+	// and the SCAN cap is what surfaces.
+	send: async () => {
+		throw new Error("Unknown index name")
+	},
+	sadd: async () => 1,
+	srem: async () => 1,
+	smembers: async (): Promise<string[]> => [],
 }
 
 mock.module("../../src/redis", () => ({
@@ -31,10 +42,18 @@ mock.module("../../src/redis", () => ({
 
 // Dynamic imports are required here: the route modules must be evaluated after
 // mock.module registers the redis stub, which static hoisting prevents.
-const [{ deleteRoutes }, { fetchRoutes }, { collectScanKeys, rangeRoutes }] = await Promise.all([
+const [
+	{ deleteRoutes },
+	{ fetchRoutes },
+	{ collectScanKeys, rangeRoutes },
+	{ resetRoutes },
+	{ randomRoutes },
+] = await Promise.all([
 	import("../../src/routes/delete"),
 	import("../../src/routes/fetch"),
 	import("../../src/routes/range"),
+	import("../../src/routes/reset"),
+	import("../../src/routes/random"),
 ])
 
 // Bun's RedisClient can't be constructed in tests; the stub implements the
@@ -142,4 +161,103 @@ describe("range endpoint behavior below the scan cap", () => {
 		expect(json.result?.nextCursor).toBe("")
 		expect(json.result?.vectors?.map((v) => v.id)).toEqual(["a", "b"])
 	})
+})
+
+describe("explicit-id resource budgets", () => {
+	for (const [routes, path] of [
+		[fetchRoutes, "/fetch/ns"],
+		[deleteRoutes, "/delete/ns"],
+	] as const) {
+		test(`${path} rejects more than 1000 ids before Redis work`, async () => {
+			const ids = Array.from({ length: 1001 }, (_, i) => `id-${i}`)
+			const res = await postJson(appWith(routes), path, { ids })
+			expect(res.status).toBe(400)
+			expect(await res.json()).toMatchObject({ error: "Batch must not exceed 1000 ids" })
+		})
+	}
+})
+
+describe("scan iteration cap fails loudly on every path", () => {
+	// A truncated enumeration reported as success let reset/delete claim
+	// completion while matching keys survived — range already threw, these
+	// paths silently broke. (deep audit 2026-09-06, F3)
+	const endless = async (): Promise<[string, string[]]> => ["9", []]
+
+	test("delete by prefix aborts with 400", async () => {
+		scanImpl = endless
+		const res = await postJson(appWith(deleteRoutes), "/delete/ns", { prefix: "a" })
+		expect(res.status).toBe(400)
+		const json = (await res.json()) as Envelope
+		expect(json.error).toContain("scanable key limit")
+	})
+
+	test("delete by filter aborts with 400", async () => {
+		scanImpl = endless
+		const res = await postJson(appWith(deleteRoutes), "/delete/ns", { filter: "x > 1" })
+		expect(res.status).toBe(400)
+	})
+
+	test("fetch by prefix aborts with 400", async () => {
+		scanImpl = endless
+		const res = await postJson(appWith(fetchRoutes), "/fetch/ns", { prefix: "a" })
+		expect(res.status).toBe(400)
+	})
+
+	test("namespace reset aborts with 400", async () => {
+		scanImpl = endless
+		const res = await postJson(appWith(resetRoutes), "/reset/ns", {})
+		expect(res.status).toBe(400)
+	})
+
+	test("random sample aborts with 400", async () => {
+		scanImpl = endless
+		const res = await postJson(appWith(randomRoutes), "/random/ns", {})
+		expect(res.status).toBe(400)
+	})
+})
+
+describe("fetch by prefix", () => {
+	test("returns a result object per scan-derived key", async () => {
+		scanImpl = async (): Promise<[string, string[]]> => ["0", ["v:ns:doc-1", "v:ns:doc-2"]]
+		const res = await postJson(appWith(fetchRoutes), "/fetch/ns", {
+			prefix: "doc",
+			includeMetadata: true,
+		})
+		expect(res.status).toBe(200)
+		const json = (await res.json()) as { result: Array<{ id: string } | null> }
+		expect(json.result.map((v) => v?.id)).toEqual(["doc-1", "doc-2"])
+	})
+})
+
+test("reset all propagates failed erasure and preserves embedding registry", async () => {
+	const originalMembers = fakeRedis.smembers
+	fakeRedis.smembers = async () => ["reset-failure"]
+	delCalls.length = 0
+	scanImpl = async () => {
+		throw new ValidationError("scan aborted")
+	}
+	try {
+		const res = await postJson(appWith(resetRoutes), "/reset?all=true", {})
+		expect(res.status).toBe(400)
+		expect(await res.json()).toMatchObject({ error: "scan aborted" })
+		expect(delCalls).toEqual([])
+	} finally {
+		fakeRedis.smembers = originalMembers
+	}
+})
+
+test("prefix fetch omits rows deleted after SCAN", async () => {
+	const originalExists = fakeRedis.exists
+	fakeRedis.exists = async () => 0
+	scanImpl = async () => ["0", ["v:ns:gone"]]
+	try {
+		const res = await postJson(appWith(fetchRoutes), "/fetch/ns", {
+			prefix: "gone",
+			includeMetadata: true,
+		})
+		expect(res.status).toBe(200)
+		expect(await res.json()).toEqual({ result: [] })
+	} finally {
+		fakeRedis.exists = originalExists
+	}
 })

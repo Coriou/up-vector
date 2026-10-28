@@ -2,12 +2,33 @@ import type { MiddlewareHandler } from "hono"
 import { log } from "../logger"
 import { recordRequest } from "../metrics"
 
-// Extract the base route (first path segment) for metric labeling.
-// Falls back to "/unknown" to prevent label cardinality explosion
-// and Prometheus format injection from arbitrary paths.
-function routeLabel(path: string): string {
-	const match = path.match(/^\/([a-z-]+)/)
-	return match ? `/${match[1]}` : "/unknown"
+// Labels must come from a finite set, including requests rejected before routing.
+const METRIC_ROUTES = new Set([
+	"/",
+	"/health",
+	"/metrics",
+	"/upsert",
+	"/upsert-data",
+	"/query",
+	"/query-data",
+	"/fetch",
+	"/delete",
+	"/update",
+	"/range",
+	"/reset",
+	"/info",
+	"/random",
+	"/list-namespaces",
+	"/delete-namespace",
+	"/rename-namespace",
+	"/resumable-query",
+	"/resumable-query-data",
+	"/resumable-query-next",
+	"/resumable-query-end",
+])
+export function routeLabel(path: string): string {
+	const base = path === "/" ? "/" : `/${path.split("/")[1]}`
+	return METRIC_ROUTES.has(base) ? base : "/unknown"
 }
 
 // X-Request-ID is forwarded from clients when present so distributed traces

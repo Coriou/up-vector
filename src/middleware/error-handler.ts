@@ -16,6 +16,9 @@ export const errorHandler: ErrorHandler = (err, c) => {
 		// in which case `err.message` is empty. Fall back to the canonical HTTP
 		// status text so we don't return a misleading "Unauthorized" for a 400.
 		const message = err.message || statusText(err.status)
+		// Keep bearer-auth's challenge while replacing its body with our envelope.
+		const challenge = err.getResponse().headers.get("WWW-Authenticate")
+		if (challenge) c.header("WWW-Authenticate", challenge)
 		return c.json({ error: message, status: err.status }, err.status)
 	}
 
