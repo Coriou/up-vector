@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from "bun:test"
+import { config } from "../../src/config"
 import { ValidationError } from "../../src/errors"
 
 type SendFn = (command: string, args: string[]) => Promise<unknown>
@@ -20,7 +21,9 @@ mock.module("../../src/redis", () => ({
 }))
 
 // Dynamic import: the module under test must bind the stubbed redis module.
-const { ensureIndex, getDetectedDimension } = await import("../../src/translate/index")
+const { ensureIndex, getDetectedDimension, loadDimension } = await import(
+	"../../src/translate/index"
+)
 
 const resp3Info = (dim: number, metric = "COSINE") => ({
 	num_docs: 0,
@@ -66,4 +69,37 @@ describe("existing-index FT.INFO verification", () => {
 		const ns = "verify-mismatch"
 		await expect(ensureIndex(ns, 4)).rejects.toThrow(ValidationError)
 	})
+})
+
+describe("rejected indexes never enter trusted caches", () => {
+	test("rechecks an incompatible existing index on every upsert", async () => {
+		existingIndex(resp3Info(4, "IP"))
+		for (let i = 0; i < 2; i++) {
+			await expect(ensureIndex("metric-retry-create", 4)).rejects.toThrow(/metric mismatch/)
+			expect(getDetectedDimension("metric-retry-create")).toBeUndefined()
+		}
+	})
+	test("rechecks an incompatible index on every dimension lookup", async () => {
+		existingIndex(resp3Info(4, "IP"))
+		for (let i = 0; i < 2; i++) {
+			await expect(loadDimension("metric-retry-load")).rejects.toThrow(/metric mismatch/)
+			expect(getDetectedDimension("metric-retry-load")).toBeUndefined()
+		}
+	})
+})
+
+test("cold dimension lookup accepts Redis metric aliases", async () => {
+	const original = config.metric
+	try {
+		for (const [metric, redisMetric] of [
+			["EUCLIDEAN", "L2"],
+			["DOT_PRODUCT", "IP"],
+		] as const) {
+			config.metric = metric
+			existingIndex(resp3Info(4, redisMetric))
+			await expect(loadDimension(`load-alias-${metric}`)).resolves.toBe(4)
+		}
+	} finally {
+		config.metric = original
+	}
 })

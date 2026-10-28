@@ -61,12 +61,16 @@ describe("errorHandler", () => {
 		// hardcode "Unauthorized" for every empty-message HTTPException, which
 		// produced misleading bodies for 4xx other than 401.
 		const app = makeApp(() => {
-			throw new HTTPException(401)
+			throw new HTTPException(401, {
+				res: new Response(null, { status: 401, headers: { "WWW-Authenticate": "Bearer" } }),
+			})
 		})
 		const res = await app.request("/")
 		const { status, body } = await asJson(res)
 		expect(status).toBe(401)
 		expect(body.error).toBe("Unauthorized")
+		expect(res.headers.get("WWW-Authenticate")).toBe("Bearer")
+		expect(res.headers.get("Content-Type")).toContain("application/json")
 	})
 
 	test("HTTPException with empty message uses status text fallback (400)", async () => {

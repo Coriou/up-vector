@@ -306,3 +306,42 @@ describe("CRUD lifecycle", () => {
 		expect(updateStatus).toBe(400)
 	})
 })
+
+test("oversized merged PATCH is rejected before any data or vector write", async () => {
+	const ns = "patch-budget"
+	await api("POST", `/upsert/${ns}`, {
+		id: "one",
+		vector: [1, 0, 0],
+		metadata: { first: "a".repeat(90_000) },
+		data: "original",
+	})
+	const rejected = await api("POST", `/update/${ns}`, {
+		id: "one",
+		vector: [0, 1, 0],
+		data: "changed",
+		metadata: { second: "b".repeat(90_000) },
+		metadataUpdateMode: "PATCH",
+	})
+	expect(rejected.status).toBe(400)
+	const fetched = await api("POST", `/fetch/${ns}`, {
+		ids: ["one"],
+		includeMetadata: true,
+		includeData: true,
+		includeVectors: true,
+	})
+	const row = (
+		fetched.data as {
+			result: Array<{ metadata: Record<string, string>; data: string; vector: number[] }>
+		}
+	).result[0]
+	expect(row.metadata).toEqual({ first: "a".repeat(90_000) })
+	expect(row.data).toBe("original")
+	expect(row.vector).toEqual([1, 0, 0])
+	const accepted = await api("POST", `/update/${ns}`, {
+		id: "one",
+		metadata: { first: null, second: "b".repeat(90_000) },
+		metadataUpdateMode: "PATCH",
+	})
+	expect(accepted.status).toBe(200)
+	await api("DELETE", `/delete-namespace/${ns}`)
+})

@@ -1,7 +1,11 @@
+import type { RedisClient } from "bun"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
+import { ValidationError } from "../errors"
 import { getClient } from "../redis"
 import {
+	escapeGlobMeta,
+	MAX_SCAN_ITERATIONS,
 	parseVectorKey,
 	validateId,
 	validateNamespace,
@@ -44,11 +48,7 @@ const handleFetch = async (c: Context) => {
 	// Fetch by IDs (default path, also used when both ids and prefix are given)
 	if (parsed.ids) {
 		const results = await Promise.all(
-			parsed.ids.map(async (id): Promise<Vector | null> => {
-				const hash = await redis.hgetall(vectorKey(ns, id))
-				if (!hash || Object.keys(hash).length === 0) return null
-				return buildVector(hash, id, parsed)
-			}),
+			parsed.ids.map((id) => fetchVectorFields(redis, vectorKey(ns, id), parsed)),
 		)
 		return c.json({ result: results })
 	}
@@ -56,16 +56,9 @@ const handleFetch = async (c: Context) => {
 	// Fetch by prefix — Upstash caps at 1000 results for prefix fetch
 	if (parsed.prefix) {
 		validatePrefix(parsed.prefix)
-		const pattern = `${vectorPrefix(ns)}${parsed.prefix}*`
+		const pattern = `${vectorPrefix(ns)}${escapeGlobMeta(parsed.prefix)}*`
 		const keys = await scanAll(redis, pattern, 1000)
-		const results = await Promise.all(
-			keys.map(async (key) => {
-				const hash = await redis.hgetall(key)
-				if (!hash || Object.keys(hash).length === 0) return null
-				const parsed_key = parseVectorKey(key)
-				return buildVector(hash, parsed_key?.id ?? hash.id, parsed)
-			}),
-		)
+		const results = await Promise.all(keys.map((key) => fetchVectorFields(redis, key, parsed)))
 		return c.json({ result: results.filter(Boolean) })
 	}
 
@@ -102,10 +95,49 @@ function buildVector(
 	return vec
 }
 
-const MAX_SCAN_ITERATIONS = 10_000
+// Read paths project only the fields the response flags need. The raw `vec`
+// blob (RediSearch-only) and unrequested metadata/data previously rode along
+// on every fetch — up to ~1.1GB transferred and discarded per 1000-id request
+// at the per-field caps. (deep audit 2026-09-06, F8)
+function requestedFields(opts: {
+	includeVectors: boolean
+	includeMetadata: boolean
+	includeData: boolean
+}): string[] {
+	const fields: string[] = []
+	if (opts.includeVectors) fields.push("_vec")
+	if (opts.includeMetadata) fields.push("metadata")
+	if (opts.includeData) fields.push("data")
+	return fields
+}
+async function fetchVectorFields(
+	redis: RedisClient,
+	key: string,
+	opts: {
+		includeVectors: boolean
+		includeMetadata: boolean
+		includeData: boolean
+	},
+): Promise<Vector | null> {
+	const fields = requestedFields(opts)
+	const hash: Record<string, string> = {}
+	if (fields.length > 0) {
+		const values = (await redis.hmget(key, ...fields)) as (string | null)[]
+		fields.forEach((field, i) => {
+			const value = values[i]
+			if (value !== null && value !== undefined) hash[field] = value
+		})
+	}
+	if (Object.keys(hash).length === 0) {
+		// SCAN is not a snapshot: a key may disappear before the projected read.
+		// Distinguish an absent row from one with only unrequested fields.
+		if (!(await redis.exists(key))) return null
+	}
+	return buildVector(hash, parseVectorKey(key)?.id ?? key, opts)
+}
 
 async function scanAll(
-	redis: ReturnType<typeof getClient>,
+	redis: RedisClient,
 	pattern: string,
 	limit = Number.POSITIVE_INFINITY,
 ): Promise<string[]> {
@@ -113,7 +145,13 @@ async function scanAll(
 	let cursor = "0"
 	let iterations = 0
 	do {
-		if (++iterations > MAX_SCAN_ITERATIONS) break
+		if (++iterations > MAX_SCAN_ITERATIONS) {
+			// Loud like range.ts: a truncated prefix enumeration presented as
+			// complete is a silent correctness bug. (deep audit 2026-09-06, F3)
+			throw new ValidationError(
+				`Keyspace exceeds the scanable key limit (${MAX_SCAN_ITERATIONS} SCAN iterations); prefix enumeration aborted`,
+			)
+		}
 		const result = await redis.scan(cursor, "MATCH", pattern, "COUNT", 100)
 		const [next, batch] = result as unknown as [string, string[]]
 		for (const key of batch) {

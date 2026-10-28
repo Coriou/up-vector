@@ -1,8 +1,16 @@
+import type { RedisClient } from "bun"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { ValidationError } from "../errors"
 import { getClient } from "../redis"
-import { parseVectorKey, validateNamespace, validatePrefix, vectorPrefix } from "../translate/keys"
+import {
+	escapeGlobMeta,
+	MAX_SCAN_ITERATIONS,
+	parseVectorKey,
+	validateNamespace,
+	validatePrefix,
+	vectorPrefix,
+} from "../translate/keys"
 import { decodeVectorBase64 } from "../translate/vectors"
 import type { Vector } from "../types"
 
@@ -20,8 +28,6 @@ const RangeBody = z.object({
 	includeData: z.boolean().default(false),
 })
 
-const MAX_SCAN_ITERATIONS = 10_000
-
 /**
  * Scans every key matching `pattern`, deduplicating SCAN results. Throws a
  * ValidationError when the scan-iteration cap is exhausted before Redis
@@ -29,13 +35,12 @@ const MAX_SCAN_ITERATIONS = 10_000
  * presenting a truncated enumeration as complete.
  */
 export async function collectScanKeys(
-	redis: ReturnType<typeof getClient>,
+	redis: RedisClient,
 	pattern: string,
 	maxIterations: number = MAX_SCAN_ITERATIONS,
 ): Promise<Set<string>> {
 	let scanCursor = "0"
 	const collectedKeys = new Set<string>()
-	const seenKeys = new Set<string>()
 	let iterations = 0
 
 	do {
@@ -47,12 +52,8 @@ export async function collectScanKeys(
 		const result = await redis.scan(scanCursor, "MATCH", pattern, "COUNT", 100)
 		const [next, keys] = result as unknown as [string, string[]]
 
-		for (const key of keys) {
-			// SCAN can return duplicate keys across iterations — deduplicate
-			if (seenKeys.has(key)) continue
-			seenKeys.add(key)
-			collectedKeys.add(key)
-		}
+		// SCAN can return duplicate keys across iterations — Set.add dedupes.
+		for (const key of keys) collectedKeys.add(key)
 
 		scanCursor = next
 	} while (scanCursor !== "0")
@@ -71,7 +72,9 @@ const handleRange = async (c: Context) => {
 
 	if (parsed.prefix) validatePrefix(parsed.prefix)
 	const basePrefix = vectorPrefix(ns)
-	const pattern = parsed.prefix ? `${basePrefix}${parsed.prefix}*` : `${basePrefix}*`
+	const pattern = parsed.prefix
+		? `${basePrefix}${escapeGlobMeta(parsed.prefix)}*`
+		: `${basePrefix}*`
 
 	// Upstash's public cursor is an offset string ("0", "100", ...), not a
 	// Redis SCAN cursor. Scan the namespace, sort for stable paging, then slice by
@@ -86,22 +89,36 @@ const handleRange = async (c: Context) => {
 	// Fetch details for each matched key
 	const vectors: Vector[] = await Promise.all(
 		pageKeys.map(async (key) => {
-			const hash = await redis.hgetall(key)
-			const parsedKey = parseVectorKey(key)
-			const id = parsedKey?.id ?? hash?.id ?? key
-
+			const id = parseVectorKey(key)?.id ?? key
 			const vec: Vector = { id }
-			if (parsed.includeVectors && hash?._vec) {
+			// Project only the fields the response flags need (HMGET) — the raw
+			// `vec` blob and unrequested metadata/data previously rode along on
+			// every page. (deep audit 2026-09-06, F8)
+			const fields = [
+				...(parsed.includeVectors ? ["_vec"] : []),
+				...(parsed.includeMetadata ? ["metadata"] : []),
+				...(parsed.includeData ? ["data"] : []),
+			]
+			if (fields.length === 0) {
+				return vec
+			}
+			const values = (await redis.hmget(key, ...fields)) as (string | null)[]
+			const hash: Record<string, string> = {}
+			fields.forEach((field, i) => {
+				const value = values[i]
+				if (value !== null && value !== undefined) hash[field] = value
+			})
+			if (parsed.includeVectors && hash._vec) {
 				vec.vector = decodeVectorBase64(hash._vec)
 			}
-			if (parsed.includeMetadata && hash?.metadata) {
+			if (parsed.includeMetadata && hash.metadata) {
 				try {
 					vec.metadata = JSON.parse(hash.metadata)
 				} catch {
 					// Malformed metadata JSON — skip
 				}
 			}
-			if (parsed.includeData && hash?.data !== undefined) {
+			if (parsed.includeData && hash.data !== undefined) {
 				vec.data = hash.data
 			}
 			return vec

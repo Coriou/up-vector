@@ -46,6 +46,15 @@ export function recordRequest(
 ): void {
 	if (!config.metricsEnabled) return
 
+	// HTTP allows arbitrary method tokens; retain only a finite vocabulary.
+	if (
+		!["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "CONNECT", "TRACE"].includes(
+			method,
+		)
+	) {
+		method = "OTHER"
+	}
+
 	// Increment request counter
 	const counterKey = `${method}:${status}:${route}`
 	requestCounts.set(counterKey, (requestCounts.get(counterKey) ?? 0) + 1)

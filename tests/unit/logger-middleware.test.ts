@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { Hono } from "hono"
-import { loggerMiddleware, sanitizeIncomingRequestId } from "../../src/middleware/logger"
+import {
+	loggerMiddleware,
+	routeLabel,
+	sanitizeIncomingRequestId,
+} from "../../src/middleware/logger"
 
 function makeApp(): Hono {
 	const app = new Hono()
@@ -75,5 +79,18 @@ describe("sanitizeIncomingRequestId", () => {
 	test("accepts ids at exactly the cap", () => {
 		const cap = "x".repeat(128)
 		expect(sanitizeIncomingRequestId(cap)).toBe(cap)
+	})
+})
+
+describe("metric route cardinality", () => {
+	test("collapses arbitrary paths to one label", () => {
+		for (let i = 0; i < 1000; i++) expect(routeLabel(`/attacker-${i}`)).toBe("/unknown")
+		expect(routeLabel("/query-extra")).toBe("/unknown")
+		expect(routeLabel("/query123")).toBe("/unknown")
+	})
+	test("uses fixed labels for known routes and arbitrary namespaces", () => {
+		expect(routeLabel("/query/customer-123")).toBe("/query")
+		expect(routeLabel("/health")).toBe("/health")
+		expect(routeLabel("/")).toBe("/")
 	})
 })
