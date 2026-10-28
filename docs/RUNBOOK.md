@@ -17,15 +17,22 @@ Principles:
 - Every automated signal lands as an issue with a stable label. No signal lives
   only in a log nobody reads.
 
-Verified baseline at runbook creation (2026-08-22): **383 tests** — 249 unit /
-60 integration / 74 SDK compatibility — green on Bun 1.3.6-pinned CI, local Bun
-1.3.14, Redis Stack `7.4.0-v8`, hono `4.13.3`.
+Verified baseline (2026-10-28): **475 tests** — 340 unit / 61 integration /
+74 SDK compatibility — green locally on Bun 1.4.0 and latest 1.4.4, Redis Stack
+`7.4.0-v8` (Redis 7.4.7), SDK 1.2.3 (registry latest), Hono 4.13.14, Zod 4.6.7.
+`bun audit --json` returns `{}`. Bun CI and Docker pins moved to **1.4.4 only
+after the full canary passed**. Redis `latest` has the identical digest as the
+existing pin; Redis pin unchanged. Remote PR CI is a separate check.
+Full evidence, PR25 reconciliation, advisory triage, and open risks:
+[`audits/2026-10-28-maintenance.md`](audits/2026-10-28-maintenance.md).
+Historical baseline: 465 tests in September's audit, 444 after August's fixes,
+383 at runbook creation.
 
 ## Automation inventory
 
 | Mechanism | When | Watches | Failure signal |
 |---|---|---|---|
-| `test.yml` | push / PR touching code | our code vs pinned Bun 1.4.0 + Redis Stack `7.4.0-v8` | red CI on the PR |
+| `test.yml` | push / PR touching code | our code vs pinned Bun 1.4.4 + Redis Stack `7.4.0-v8` | red CI on the PR |
 | `compat.yml` | Mon 09:00 UTC | `@upstash/vector@latest` against us | issue labeled `sdk-compat` |
 | `maintenance.yml` | Mon 09:30 UTC | npm advisory DB, `bun@latest`, `redis-stack-server:latest`, Docker artifact | issues labeled `security` / `maintenance` |
 | `dependabot.yml` | weekly | bun deps, GitHub Actions pins, Dockerfile base image, compose Redis pin | PRs labeled `dependencies` |
@@ -51,7 +58,8 @@ Verified baseline at runbook creation (2026-08-22): **383 tests** — 249 unit /
    specific surface, document the analysis in the issue, decide mitigation.
 3. Reference point: hono advisories GHSA-8j4g-w8fx-2239, GHSA-f23p-vx2j-j53r,
    GHSA-79qm-7rj5-m7r9, GHSA-54fx-42gc-7vw4 were all resolved by 4.12.34;
-   we ship ≥ 4.13.3.
+   we ship 4.13.14. The 2026-10-28 audit also resolves the six advisories
+   tracked by #44 (and earlier subsets #38/#30).
 
 ### `maintenance` issue (canary or smoke failed)
 
@@ -80,38 +88,30 @@ Before tagging or publishing any release:
 - [ ] `bun audit --json` clean
 - [ ] Latest weekly `compat.yml` + `maintenance.yml` runs green (re-run via
       `workflow_dispatch` if stale)
-- [ ] Docker build + smoke path green
+- [ ] Docker build + `./scripts/docker-smoke.sh` green (assert health, auth, stored query result)
 - [ ] `README.md` / `CLAUDE.md` env tables and test counts still truthful
+
+## Local gate isolation
+
+`./scripts/test-all.sh` allocates a unique Compose project and disposable volume,
+selects available ports, probes Redis/HTTP readiness, and cleans up only its own
+server and containers (also on failure). It intentionally supplies deterministic
+test credentials and a fake embedding provider; it does not reuse the deployment
+Redis URL or token. Select another Bun through PATH to run the same complete gate
+as a runtime canary. The Docker smoke script uses a private network and no host
+ports, and accepts optional image and Redis tag arguments.
 
 ## Deep audit (the workflowz)
 
-Run quarterly, before notable releases, and after upstream majors (SDK, Bun,
-Redis Stack). Executed with the agent harness as a parallel fan-out; the
-procedure is deterministic and re-runnable. Past runs land in `docs/audits/`.
+The deterministic, re-runnable procedure lives in
+[`docs/workflows/deep-audit.md`](./workflows/deep-audit.md): finder
+dimensions and prompts, refuter rules (default-refute), synthesis and exit
+criteria, and the scope-guardrails list. Execute it with the agent harness
+as a parallel fan-out — or any agent runner, including a future scheduled CI
+job — exactly as written.
 
-1. **Finders (parallel, mutually blind)** — one agent per dimension:
-   - *protocol correctness*: Float32 little-endian round-trips, RESP3 shape
-     handling, score normalization per metric (COSINE / EUCLIDEAN /
-     DOT_PRODUCT), binary-safe Redis paths (`redis.send`)
-   - *security*: auth bypass vectors, injection through ids / namespaces /
-     filter strings, header handling, body-limit enforcement
-   - *resource safety*: topK / dimension bombs, timeout coverage, unbounded
-     over-fetch in filter evaluation, shutdown drain
-   - *parity*: `_ENDPOINTS` inventory of the installed `@upstash/vector` vs
-     `src/routes/*` vs the live Upstash REST docs — every endpoint must be
-     supported, explicitly rejected, or explicitly 501
-   - *concurrency & self-heal*: Redis client re-init, lazy `FT.CREATE` races,
-     graceful shutdown during in-flight writes
-   Each finder returns structured findings `{file, line, title, evidence,
-   severity}` — no vibes, citations required.
-2. **Refutation (parallel)** — one skeptic per finding, prompted to REFUTE,
-   defaulting to "refuted" when evidence is weak. A finding survives only with
-   concrete file/line evidence the skeptic cannot break.
-3. **Synthesis** — survivors are deduplicated, severity-ranked, and turned into
-   issues or immediate fixes. Disputed findings are reported as disputed, never
-   silently dropped.
-
-Scope guardrails for finders (things that look like bugs but are decisions):
-sparse/hybrid vectors are intentionally rejected; resumable query endpoints are
-intentionally 501; metadata filtering is intentionally app-level over-fetch in
-v1; score values approximate Upstash cloud but are not bit-identical.
+Cadence: quarterly, before notable releases, and after upstream majors (SDK,
+Bun, Redis Stack). Past runs land in `docs/audits/` — latest:
+[2026-09-06](./audits/2026-09-06-deep-audit.md) (17 raw findings, 12
+survivors, 8 fixed in-pass with regression tests, 3 open issues #22 #23
+#24, 5 refuted).
