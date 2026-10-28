@@ -74,7 +74,7 @@ export async function loadDimension(ns: string): Promise<number | undefined> {
 }
 
 export async function ensureIndex(ns: string, dimension: number): Promise<void> {
-	refreshCacheGeneration()
+	const generation = refreshCacheGeneration()
 	const idx = indexName(ns)
 	if (knownIndexes.has(idx)) {
 		const cached = dimensionMap.get(ns)
@@ -88,11 +88,9 @@ export async function ensureIndex(ns: string, dimension: number): Promise<void> 
 	const pending = pendingIndexCreations.get(idx)
 	if (pending) {
 		await pending
-		const cached = dimensionMap.get(ns)
-		if (cached !== undefined && cached !== dimension) {
-			throw new ValidationError(`Dimension mismatch: namespace expects ${cached}, got ${dimension}`)
-		}
-		return
+		// Reconnect can discard the creator's cache write. Re-enter validation
+		// so a missing cache never authorizes a different-dimensional writer.
+		return ensureIndex(ns, dimension)
 	}
 
 	const promise = createIndexInternal(ns, dimension, idx)
@@ -102,6 +100,9 @@ export async function ensureIndex(ns: string, dimension: number): Promise<void> 
 	} finally {
 		if (pendingIndexCreations.get(idx) === promise) pendingIndexCreations.delete(idx)
 	}
+	// The creating request also needs validation against the current connection,
+	// even though its old completion was correctly prevented from caching.
+	if (refreshCacheGeneration() !== generation) return ensureIndex(ns, dimension)
 }
 
 async function createIndexInternal(ns: string, dimension: number, idx: string): Promise<void> {

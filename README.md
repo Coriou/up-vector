@@ -147,7 +147,7 @@ curl -X POST http://localhost:8080/query-data \
 
 ## API Compatibility
 
-Implements the dense-vector subset of the [Upstash Vector REST API](https://upstash.com/docs/vector/api/endpoints), plus dense `/upsert-data` and `/query-data` through a configurable embedding provider. Validated by 489 tests including 74 using the real `@upstash/vector` SDK.
+Implements the dense-vector subset of the [Upstash Vector REST API](https://upstash.com/docs/vector/api/endpoints), plus dense `/upsert-data` and `/query-data` through a configurable embedding provider. Validated by 495 tests including 74 using the real `@upstash/vector` SDK.
 
 | Surface | Status | Notes |
 |----------|--------|-------|
@@ -309,11 +309,11 @@ bun run typecheck        # TypeScript check
 
 ### Testing
 
-489 tests across three tiers:
+495 tests across three tiers:
 
 | Tier | Tests | Purpose |
 |------|-------|---------|
-| **Unit** | 347 | Filter parser, embedding providers, vector encode/decode, score normalization, key naming, middleware/config hardening, route validation |
+| **Unit** | 353 | Filter parser, embedding providers, vector encode/decode, score normalization, key naming, middleware/config hardening, route validation |
 | **Integration** | 68 | End-to-end REST behavior against Redis Stack, including raw-text data endpoints |
 | **SDK Compatibility** | 74 | Real `@upstash/vector` SDK against up-vector |
 
@@ -332,6 +332,12 @@ The compatibility tests are the ultimate validation — they use the actual `@up
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup and contribution guidelines.
 
 ## Deployment
+
+The GHCR publication workflow is manually dispatched after all release gates pass
+for the same main commit. It publishes `ghcr.io/coriou/up-vector:latest` and
+`sha-<full-commit-sha>` for **linux/amd64 only**. See the
+[publication runbook](docs/RUNBOOK.md#manual-ghcr-publication) for dispatch,
+package visibility, and immutable digest deployment instructions.
 
 ### Docker Compose (standalone)
 

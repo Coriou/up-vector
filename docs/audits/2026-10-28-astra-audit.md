@@ -123,3 +123,63 @@ publication prerequisites remain, plus explicit acceptance/remediation of the
 open operational risks. No tag, release, registry push, or merge was performed.
 All local gate/smoke containers, networks, and test volumes were removed by their
 scripts. The active managed worktree and unrelated branches/resources remain.
+
+## Independent final review of PR48
+
+A new direct review inspected `ad444ee04ba78d2cbfef6cb06ee311a992c04166`
+against `5be3db9`, without delegated agents. One additional concrete regression
+survived refutation: `ensureIndex` waiters could accept a different dimension
+when an in-flight creator crossed a connection generation change. The old cache
+write was correctly discarded, but the waiter treated the missing cache as
+successful validation. A deterministic regression returned `accepted` before
+this fix. Waiters now re-enter index validation; creators also revalidate when
+their generation changed. The old-completion test now requires rejection of an
+incompatible current-generation dimension as well as preservation of its cache.
+
+Other challenged paths:
+
+- ALS guards act at invocation, including detached/pre-acquired handles, and
+  native method calls use the underlying Bun client as receiver. Real Redis
+  suites exercise `send`, native helpers, timeout continuation, and reconnect.
+- The `read-budget -> routes/upsert -> redis` import path does not lead back to
+  read-budget: Redis imports only request-context and the separate generation
+  module. Standalone budget tests, server startup, and the production bundle
+  pass. Projection reservation covers filter metadata and shared batch context;
+  conservative rejection and externally oversized Redis fields remain limits.
+- PATCH retains Buffer arguments through `send("EVAL", ...)`; comparison and
+  all-field writes are atomic. Real RediSearch query tests, precision/array
+  preservation, disjoint concurrent PATCH tests, and forced eight-retry conflict
+  tests pass. It is not a transaction across reset/rename or all requests.
+- Health single-flight and connected-client non-replacement, generation cache
+  invalidation, and real automatic reconnect pass their Redis regressions.
+
+Added manual `publish.yml` and a tested `verify-publication-gates.sh`: main-only,
+exact checkout SHA, serialized publication, least-privilege GITHUB_TOKEN,
+latest successful same-SHA Test/SDK Compatibility/Maintenance gates, local
+linux/amd64 build and exact-image smoke before login, full-SHA/latest tags,
+source/revision labels, and registry digest in the summary. Gates run again
+before push; no polling or publication occurs during this review. Test now also
+supports manual dispatch for commits otherwise excluded by path filters.
+README/RUNBOOK document dispatch, package visibility/access, platform scope,
+mutable tags, partial-push behavior, and final-main-SHA requirements. The earlier
+publication-infrastructure investigation above describes the pre-review state.
+
+Final validation on Bun **1.4.4**: **495 passed, 0 failed** (353 unit, 68
+integration, 74 installed SDK 1.2.3 compatibility), typecheck, lint, production
+build, clean `bun audit --json` (`{}`), Actionlint across all workflows,
+ShellCheck/bash syntax for the publication gate, linux/amd64 Docker build and
+production smoke. Five publication tests cover success, each missing gate,
+pending/failed/skipped/cancelled latest runs despite older green runs,
+SHA/branch/repository/event mismatch, non-main/non-manual dispatch, and main
+advancement. The workflow-run API response shape was also checked read-only
+against the existing successful main Test run. No registry write was attempted.
+
+Host evidence: `/tmp/up-vector-final-review-gate.log`,
+`/tmp/up-vector-final-review-docker.log`, `/tmp/up-vector-final-review-smoke.log`.
+
+Verdict: no remaining newly introduced blocker found after the reconnect fix.
+This does not close existing reset/rename races or the resource/timeout limits
+listed above. Hosted checks and approval apply to the new PR head; the parent
+must merge only after those gates, then dispatch all release gates for the final
+main SHA and publish only once they pass. This reviewer does not merge, publish,
+watch the PR, or remove the parent's managed worktree.

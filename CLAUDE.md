@@ -155,7 +155,7 @@ All prefixed `UPVECTOR_`:
 ## Implementation Status
 
 Phases 1-6 complete. Dense-vector CRUD + query + filtering + namespaces + production hardening + provider-backed `/upsert-data`/`/query-data`.
-489 tests passing (347 unit, 68 integration, 74 SDK compatibility), verified 2026-10-28 with Bun 1.4.4 and SDK 1.2.3 (latest). Deep audits run per `docs/workflows/deep-audit.md`; open findings tracked under the `deep-audit` issue label.
+495 tests passing (353 unit, 68 integration, 74 SDK compatibility), verified 2026-10-28 with Bun 1.4.4 and SDK 1.2.3 (latest). Deep audits run per `docs/workflows/deep-audit.md`; open findings tracked under the `deep-audit` issue label.
 Latest adversarial review: [`docs/audits/2026-10-28-astra-audit.md`](docs/audits/2026-10-28-astra-audit.md). Reads have a conservative 64 MiB projection budget; request deadlines prevent later Redis dispatch but cannot roll back issued commands. PATCH uses bounded compare-and-write retries (409 on contention).
 Production hardening includes structured JSON logging, graceful shutdown, health probes, request timeouts, Prometheus metrics (optional scrape token), body limits, binary vector round-trip protection, Redis client self-heal, and process-level error handlers.
 See `PLAN.md` for the full architecture and phase breakdown.

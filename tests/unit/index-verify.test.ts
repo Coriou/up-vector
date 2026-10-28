@@ -113,6 +113,28 @@ test("old in-flight creation cannot overwrite a new Redis generation's cache", a
 	send = async () => "OK"
 	await ensureIndex("generation-race", 4)
 	old.resolve("OK")
-	await pending
+	await expect(pending).rejects.toThrow(/Dimension mismatch/)
 	expect(getDetectedDimension("generation-race")).toBe(4)
+})
+
+test("coalesced creator revalidates dimensions if reconnect clears its cache", async () => {
+	const { advanceRedisGeneration } = await import("../../src/redis-generation")
+	const gate = Promise.withResolvers<unknown>()
+	let creates = 0
+	send = async (command) => {
+		if (command === "FT.CREATE" && creates++ === 0) return gate.promise
+		if (command === "FT.CREATE") throw new Error("Index already exists")
+		if (command === "FT.INFO") return resp3Info(3)
+		throw new Error(`unexpected command ${command}`)
+	}
+	const first = ensureIndex("reconnect-coalesced", 3)
+	const second = ensureIndex("reconnect-coalesced", 4)
+	const outcome = second.then(
+		() => "accepted",
+		(error: Error) => error.message,
+	)
+	advanceRedisGeneration()
+	gate.resolve("OK")
+	await first
+	expect(await outcome).toMatch(/Dimension mismatch/)
 })
