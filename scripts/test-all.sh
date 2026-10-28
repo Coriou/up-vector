@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 is_port_free() {
 	! lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
@@ -15,45 +15,48 @@ find_free_port() {
 
 export UPVECTOR_REDIS_PORT="${UPVECTOR_REDIS_PORT:-$(find_free_port 6379)}"
 export UPVECTOR_PORT="${UPVECTOR_PORT:-$(find_free_port 8080)}"
-export UPVECTOR_REDIS_URL="${UPVECTOR_REDIS_URL:-redis://localhost:${UPVECTOR_REDIS_PORT}}"
-export UPVECTOR_TEST_URL="${UPVECTOR_TEST_URL:-http://localhost:${UPVECTOR_PORT}}"
-export UPVECTOR_URL="${UPVECTOR_URL:-${UPVECTOR_TEST_URL}}"
-export UPVECTOR_EMBEDDING_PROVIDER="${UPVECTOR_EMBEDDING_PROVIDER:-fake}"
-export UPVECTOR_EMBEDDING_MODEL="${UPVECTOR_EMBEDDING_MODEL:-fake-embedding}"
-export UPVECTOR_EMBEDDING_DIMENSION="${UPVECTOR_EMBEDDING_DIMENSION:-8}"
+export UPVECTOR_REDIS_URL="redis://localhost:${UPVECTOR_REDIS_PORT}"
+export UPVECTOR_TEST_URL="http://localhost:${UPVECTOR_PORT}"
+export UPVECTOR_URL="${UPVECTOR_TEST_URL}"
+export UPVECTOR_TOKEN=test-token-123
+export UPVECTOR_EMBEDDING_PROVIDER=fake
+export UPVECTOR_EMBEDDING_MODEL=fake-embedding
+export UPVECTOR_EMBEDDING_DIMENSION=8
 
-echo "=== Starting Redis Stack ==="
-echo "Redis: ${UPVECTOR_REDIS_URL}"
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up redis -d
-sleep 3
-
-echo "=== Starting up-vector ==="
-echo "HTTP: ${UPVECTOR_TEST_URL}"
-UPVECTOR_TOKEN=test-token-123 bun run src/index.ts &
-SERVER_PID=$!
-sleep 2
-
+# Never reuse production Redis data or stop the user's default Compose project.
+TEST_PROJECT="up-vector-test-$$"
+SERVER_PID=""
+compose() {
+	docker compose -p "$TEST_PROJECT" -f docker-compose.yml -f docker-compose.dev.yml "$@"
+}
 cleanup() {
-	echo "=== Cleaning up ==="
-	kill "$SERVER_PID" 2>/dev/null || true
-	docker compose down 2>/dev/null || true
+	if [ -n "$SERVER_PID" ]; then
+		kill "$SERVER_PID" 2>/dev/null || true
+		wait "$SERVER_PID" 2>/dev/null || true
+	fi
+	compose down --volumes >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
-echo "=== Type check ==="
+wait_for() {
+	local attempt
+	for attempt in {1..30}; do
+		if "$@"; then return 0; fi
+		sleep 1
+	done
+	echo "Readiness probe failed" >&2
+	return 1
+}
+
+compose up redis -d
+wait_for compose exec -T redis redis-cli ping >/dev/null
+bun run src/index.ts &
+SERVER_PID=$!
+wait_for curl -sf "${UPVECTOR_TEST_URL}/health" >/dev/null
+
 bun run typecheck
-
-echo "=== Lint ==="
 bun run lint
-
-echo "=== Unit tests ==="
 UPVECTOR_TOKEN=test bun test tests/unit
-
-echo "=== Integration tests ==="
-UPVECTOR_TOKEN=test-token-123 bun test tests/integration
-
-echo "=== SDK compatibility tests ==="
-UPVECTOR_TOKEN=test-token-123 bun test tests/compatibility
-
-echo ""
-echo "All tests passed!"
+bun test tests/integration
+bun test tests/compatibility
+bun run build

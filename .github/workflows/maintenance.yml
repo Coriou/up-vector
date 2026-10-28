@@ -19,7 +19,7 @@ permissions:
   issues: write
 
 env:
-  BUN_PIN: "1.4.0" # must match test.yml / compat.yml
+  BUN_PIN: "1.4.4" # must match test.yml / compat.yml
   REDIS_PIN: "7.4.0-v8" # must match test.yml / compat.yml / docker-compose.yml
 
 jobs:
@@ -216,50 +216,7 @@ jobs:
         run: docker build -t up-vector:smoke .
 
       - name: Boot stack and exercise the built artifact
-        run: |
-          docker network create smoke
-          docker run -d --name redis --network smoke \
-            redis/redis-stack-server:${{ env.REDIS_PIN }}
-          docker run -d --name upvector --network smoke \
-            -e UPVECTOR_TOKEN=smoke-token \
-            -e UPVECTOR_REDIS_URL=redis://redis:6379 \
-            up-vector:smoke
-
-          curl_() {
-            docker run --rm --network smoke curlimages/curl:latest "$@"
-          }
-
-          ok=0
-          for i in $(seq 1 30); do
-            if curl_ -sf http://upvector:8080/health >/dev/null; then
-              echo "healthy after ${i}s"
-              ok=1
-              break
-            fi
-            sleep 1
-          done
-          if [ "$ok" != "1" ]; then
-            echo "::error::container never became healthy"
-            docker logs upvector || true
-            exit 1
-          fi
-
-          # Roundtrip through the deployed artifact: upsert then query.
-          curl_ -sf -X POST http://upvector:8080/upsert \
-            -H "Authorization: Bearer smoke-token" \
-            -H "Content-Type: application/json" \
-            -d '{"id":"smoke-1","vector":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8],"metadata":{"source":"smoke"}}'
-          echo
-
-          curl_ -sf -X POST http://upvector:8080/query \
-            -H "Authorization: Bearer smoke-token" \
-            -H "Content-Type: application/json" \
-            -d '{"vector":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8],"topK":1,"includeVectors":false}'
-          echo
-
-      - name: Cleanup
-        if: always()
-        run: docker rm -f redis upvector 2>/dev/null || true
+        run: ./scripts/docker-smoke.sh up-vector:smoke "${{ env.REDIS_PIN }}"
 
   notify:
     name: Open issue on failures
