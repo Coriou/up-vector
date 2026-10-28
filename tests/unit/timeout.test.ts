@@ -73,3 +73,27 @@ describe("timeoutMiddleware", () => {
 		}
 	})
 })
+
+test("a command handle acquired before timeout cannot issue a later mutation", async () => {
+	const { guardRedisCommands } = await import("../../src/request-context")
+	config.requestTimeout = 10
+	const { promise, resolve } = Promise.withResolvers<void>()
+	const calls: string[] = []
+	const redis = guardRedisCommands({
+		async scan() {
+			await promise
+			return ["fresh-key"]
+		},
+		async del() {
+			calls.push("DEL")
+		},
+	})
+	const app = appWith(async () => {
+		await redis.scan()
+		await redis.del()
+	})
+	expect((await app.request("/")).status).toBe(504)
+	resolve()
+	for (let i = 0; i < 10; i++) await new Promise<void>((r) => setImmediate(r))
+	expect(calls).toEqual([])
+})

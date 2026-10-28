@@ -1,10 +1,20 @@
 import type { MiddlewareHandler } from "hono"
 import { config } from "../config"
 import { log } from "../logger"
+import { requestContext } from "../request-context"
 
 const TIMEOUT_SENTINEL = Symbol("timeout")
 
-export const timeoutMiddleware: MiddlewareHandler = async (c, next) => {
+export const timeoutMiddleware: MiddlewareHandler = (c, next) =>
+	requestContext.run(
+		{
+			deadline: config.requestTimeout === 0 ? Infinity : Date.now() + config.requestTimeout,
+			expired: false,
+		},
+		() => handleTimeout(c, next),
+	)
+
+const handleTimeout: MiddlewareHandler = async (c, next) => {
 	if (config.requestTimeout === 0) {
 		await next()
 		return
@@ -28,6 +38,8 @@ export const timeoutMiddleware: MiddlewareHandler = async (c, next) => {
 	const result = await Promise.race([work, timeoutPromise])
 
 	if (result === TIMEOUT_SENTINEL) {
+		const request = requestContext.getStore()
+		if (request) request.expired = true
 		// The race settled on the timeout while `work` was still pending.
 		// Observe the loser now — attaching earlier would also catch errors
 		// that propagate normally through the race and mislabel every fast

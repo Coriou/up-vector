@@ -4,6 +4,7 @@ import { config } from "../config"
 import { ValidationError } from "../errors"
 import type { FilterNode } from "../filter"
 import { compileFilter, evaluate } from "../filter"
+import { reserveReadProjection } from "../read-budget"
 import { getClient } from "../redis"
 import { loadDimension } from "../translate/index"
 import { indexName, parseVectorKey, validateNamespace } from "../translate/keys"
@@ -94,6 +95,12 @@ export async function executeQuery(ns: string, query: DenseQuery): Promise<Query
 	const fetchCount = query.filter
 		? Math.min(query.topK * OVER_FETCH_FACTOR, MAX_OVER_FETCH)
 		: query.topK
+
+	reserveReadProjection(
+		fetchCount,
+		{ ...query, includeMetadata: !!filterAst || query.includeMetadata },
+		query.vector.length,
+	)
 
 	// Build FT.SEARCH KNN command
 	const queryVec = encodeVector(query.vector)

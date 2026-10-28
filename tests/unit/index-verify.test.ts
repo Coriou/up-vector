@@ -103,3 +103,16 @@ test("cold dimension lookup accepts Redis metric aliases", async () => {
 		config.metric = original
 	}
 })
+
+test("old in-flight creation cannot overwrite a new Redis generation's cache", async () => {
+	const { advanceRedisGeneration } = await import("../../src/redis-generation")
+	const old = Promise.withResolvers<unknown>()
+	send = async () => old.promise
+	const pending = ensureIndex("generation-race", 3)
+	advanceRedisGeneration()
+	send = async () => "OK"
+	await ensureIndex("generation-race", 4)
+	old.resolve("OK")
+	await pending
+	expect(getDetectedDimension("generation-race")).toBe(4)
+})

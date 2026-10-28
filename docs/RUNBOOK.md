@@ -17,13 +17,16 @@ Principles:
 - Every automated signal lands as an issue with a stable label. No signal lives
   only in a log nobody reads.
 
-Verified baseline (2026-10-28): **475 tests** — 340 unit / 61 integration /
-74 SDK compatibility — green locally on Bun 1.4.0 and latest 1.4.4, Redis Stack
-`7.4.0-v8` (Redis 7.4.7), SDK 1.2.3 (registry latest), Hono 4.13.14, Zod 4.6.7.
-`bun audit --json` returns `{}`. Bun CI and Docker pins moved to **1.4.4 only
-after the full canary passed**. Redis `latest` has the identical digest as the
-existing pin; Redis pin unchanged. Remote PR CI is a separate check.
-Full evidence, PR25 reconciliation, advisory triage, and open risks:
+Verified baseline (2026-10-28, Astra follow-up): **489 tests** — 347 unit /
+68 integration / 74 SDK compatibility — green locally on pinned Bun **1.4.4**,
+Redis Stack `7.4.0-v8` (Redis 7.4.7), SDK 1.2.3, Hono 4.13.14, Zod 4.6.7.
+Typecheck, lint, build, `bun audit --json` (`{}`), and production Docker smoke
+passed. The untouched `5be3db9` baseline had 475 passing tests. The earlier
+maintenance pass also tested Bun 1.4.0; this follow-up does not claim that
+runtime was retested. Remote PR CI remains a separate release gate.
+Evidence and release limitations:
+[`audits/2026-10-28-astra-audit.md`](audits/2026-10-28-astra-audit.md).
+Dependency/advisory reconciliation remains in the historical
 [`audits/2026-10-28-maintenance.md`](audits/2026-10-28-maintenance.md).
 Historical baseline: 465 tests in September's audit, 444 after August's fixes,
 383 at runbook creation.
@@ -115,3 +118,14 @@ Bun, Redis Stack). Past runs land in `docs/audits/` — latest:
 [2026-09-06](./audits/2026-09-06-deep-audit.md) (17 raw findings, 12
 survivors, 8 fixed in-pass with regression tests, 3 open issues #22 #23
 #24, 5 refuted).
+
+## Publication infrastructure (verified 2026-10-28)
+
+README's deployment image is `ghcr.io/coriou/up-vector:latest`. Compose builds
+locally. The repository has test, compatibility, and maintenance workflows,
+**no image-publish workflow**, no remote Git tags, and no GitHub releases.
+`package.json` says `0.1.0`; there is no established release-tag convention to
+infer from it. Verify GHCR ownership/write credentials and choose a first-release
+version/tag policy before publication. The audit environment's GitHub token
+cannot list packages (403, missing `read:packages`); its GHCR manifest probe
+timed out. Neither result establishes whether a public image already exists.
