@@ -1,0 +1,69 @@
+name: Publish GHCR
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-ghcr
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/coriou/up-vector
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify exact-SHA release gates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/verify-publication-gates.sh
+
+      - name: Build linux/amd64 image locally
+        run: |
+          docker build --platform linux/amd64 \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --tag "${IMAGE}:sha-${GITHUB_SHA}" .
+
+      - name: Smoke test the exact image before registry login
+        run: ./scripts/docker-smoke.sh "${IMAGE}:sha-${GITHUB_SHA}" 7.4.0-v8
+
+      - name: Recheck gates before pushing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/verify-publication-gates.sh
+
+      - name: Publish tested image and record digest
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push "${IMAGE}:sha-${GITHUB_SHA}"
+          digest=$(docker image inspect "${IMAGE}:sha-${GITHUB_SHA}" --format '{{index .RepoDigests 0}}')
+          if [[ ! "$digest" =~ ^ghcr\.io/coriou/up-vector@sha256:[0-9a-f]{64}$ ]]; then
+            echo '::error::No valid registry digest after SHA-tag push.' >&2
+            exit 1
+          fi
+          # Record the immutable reference even if updating latest subsequently fails.
+          # shellcheck disable=SC2016
+          printf 'Published `%s` (linux/amd64) from `%s`.\n' "$digest" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          docker tag "${IMAGE}:sha-${GITHUB_SHA}" "${IMAGE}:latest"
+          docker push "${IMAGE}:latest"
+          # shellcheck disable=SC2016
+          printf 'Tags: `sha-%s`, `latest` (same tested image).\n' "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"

@@ -1,6 +1,7 @@
 name: Test
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths: [src/**, tests/**, scripts/**, package.json, bun.lock, Dockerfile, .github/workflows/**]

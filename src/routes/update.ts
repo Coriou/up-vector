@@ -1,8 +1,10 @@
 import { Hono } from "hono"
+import { HTTPException } from "hono/http-exception"
 import { z } from "zod"
 import { config } from "../config"
 import { getEmbeddingProvider } from "../embedding"
 import { EmbeddingProviderError, ValidationError } from "../errors"
+import { mergePatch } from "../merge-patch"
 import { getClient } from "../redis"
 import { loadDimension } from "../translate/index"
 import { EMBEDDING_NS_REGISTRY, validateId, validateNamespace, vectorKey } from "../translate/keys"
@@ -50,85 +52,25 @@ const UpdateBody = z.object({
 
 export const updateRoutes = new Hono()
 
-// Single atomic update for an existing vector. Handles vector / data / OVERWRITE
-// metadata writes AND optional PATCH-merge of metadata in one Redis-atomic step
-// so a concurrent DELETE between phases can't (a) leave a half-formed hash or
-// (b) silently lose the PATCH while reporting `updated: 1`.
-//
-// Layout:
-//   KEYS[1]   = vector key
-//   ARGV[1]   = "1" if metadata PATCH is requested, "0" otherwise
-//   ARGV[2]   = JSON-encoded patch (only meaningful when ARGV[1] == "1",
-//               otherwise the empty string)
-//   ARGV[3..] = alternating field/value pairs for the direct HSET
-//               (vector / data / OVERWRITE metadata)
-//
-// Returns 1 if the vector existed and was updated, 0 otherwise.
+// PATCH is merged in JS to preserve JSON types and double precision. Lua
+// compares the exact metadata snapshot before atomically writing ALL fields.
+// -2 means a concurrent writer changed metadata; retry from a fresh snapshot.
+// EXISTS still prevents resurrecting a concurrently deleted vector.
 const ATOMIC_UPDATE_LUA = `
-local function is_object(value)
-  if type(value) ~= 'table' then
-    return false
-  end
-  for k, _ in pairs(value) do
-    if type(k) ~= 'string' then
-      return false
-    end
-  end
-  return true
-end
-
-local function merge_patch(target, patch)
-  if not is_object(patch) then
-    return patch
-  end
-  if not is_object(target) then
-    target = {}
-  end
-  for k, v in pairs(patch) do
-    if v == cjson.null then
-      target[k] = nil
-    elseif is_object(v) then
-      target[k] = merge_patch(target[k], v)
-    else
-      target[k] = v
-    end
-  end
-  return target
-end
-
 if redis.call('EXISTS', KEYS[1]) == 0 then
   return 0
 end
-local patch_mode = ARGV[1]
-local patch_json = ARGV[2]
-local merged
-if patch_mode == '1' then
+if ARGV[1] == '1' then
   local existing = redis.call('HGET', KEYS[1], 'metadata')
-  local ok_patch, patch = pcall(cjson.decode, patch_json)
-  merged = patch_json
-  if ok_patch and existing then
-    local ok, base = pcall(cjson.decode, existing)
-    if ok then
-      merged = cjson.encode(merge_patch(base, patch))
-    end
-  elseif ok_patch then
-    merged = cjson.encode(merge_patch({}, patch))
-  end
-  if #merged > ${MAX_METADATA_BYTES} then
-    return -1
+  if (existing or '') ~= ARGV[2] then
+    return -2
   end
 end
-local has_pairs = #ARGV > 2
-if has_pairs then
-  local pairs_args = {}
-  for i = 3, #ARGV do
-    pairs_args[#pairs_args + 1] = ARGV[i]
-  end
-  redis.call('HSET', KEYS[1], unpack(pairs_args))
+local pairs_args = {}
+for i = 3, #ARGV do
+  pairs_args[#pairs_args + 1] = ARGV[i]
 end
-if merged then
-  redis.call('HSET', KEYS[1], 'metadata', merged)
-end
+redis.call('HSET', KEYS[1], unpack(pairs_args))
 return 1
 `
 
@@ -183,20 +125,38 @@ updateRoutes.post("/update/:namespace?", async (c) => {
 		return c.json({ result: { updated: 0 } })
 	}
 
-	const evalArgs: (string | Buffer)[] = [
-		ATOMIC_UPDATE_LUA,
-		"1",
-		key,
-		isPatch ? "1" : "0",
-		isPatch ? JSON.stringify(parsed.metadata) : "",
-		...pairs,
-	]
-
-	const result = (await redis.send("EVAL", evalArgs as string[])) as number
-	if (result === -1) {
-		throw new ValidationError(`Merged metadata must not exceed ${MAX_METADATA_BYTES} bytes`)
+	for (let attempt = 0; attempt < 8; attempt++) {
+		let snapshot = ""
+		const writes = [...pairs]
+		if (isPatch) {
+			snapshot = (await redis.hget(key, "metadata")) ?? ""
+			let base: unknown = {}
+			if (snapshot) {
+				try {
+					base = JSON.parse(snapshot)
+				} catch {
+					// Repair malformed externally written metadata from an empty base.
+				}
+			}
+			const merged = JSON.stringify(mergePatch(base, parsed.metadata))
+			if (Buffer.byteLength(merged, "utf8") > MAX_METADATA_BYTES) {
+				throw new ValidationError(`Merged metadata must not exceed ${MAX_METADATA_BYTES} bytes`)
+			}
+			writes.push("metadata", merged)
+		}
+		const evalArgs: (string | Buffer)[] = [
+			ATOMIC_UPDATE_LUA,
+			"1",
+			key,
+			isPatch ? "1" : "0",
+			snapshot,
+			...writes,
+		]
+		const result = (await redis.send("EVAL", evalArgs as string[])) as number
+		if (result === -2) continue
+		return c.json({ result: { updated: result === 1 ? 1 : 0 } })
 	}
-	return c.json({ result: { updated: result === 1 ? 1 : 0 } })
+	throw new HTTPException(409, { message: "Concurrent metadata update; retry the request" })
 })
 
 async function embedUpdatedData(data: string | undefined): Promise<number[] | undefined> {

@@ -2,6 +2,7 @@ import type { RedisClient } from "bun"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { ValidationError } from "../errors"
+import { reserveReadProjection } from "../read-budget"
 import { getClient } from "../redis"
 import {
 	escapeGlobMeta,
@@ -85,6 +86,8 @@ const handleRange = async (c: Context) => {
 	const pageKeys = Array.from(collectedKeys)
 		.sort()
 		.slice(offset, offset + parsed.limit)
+
+	reserveReadProjection(pageKeys.length, parsed)
 
 	// Fetch details for each matched key
 	const vectors: Vector[] = await Promise.all(

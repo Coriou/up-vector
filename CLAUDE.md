@@ -140,7 +140,7 @@ All prefixed `UPVECTOR_`:
 | `UPVECTOR_LOG_FORMAT` | `json` | No | `json` (structured) or `text` (human-readable) |
 | `UPVECTOR_SHUTDOWN_TIMEOUT` | `30000` | No | Max ms to wait for request drain on shutdown |
 | `UPVECTOR_REQUEST_TIMEOUT` | `30000` | No | Per-request timeout in ms (`0` = disabled) |
-| `UPVECTOR_REDIS_REINIT_AFTER_MS` | `15000` | No | Recreate the Redis client after it is continuously unhealthy this long (self-heal; `0` = disabled) |
+| `UPVECTOR_REDIS_REINIT_AFTER_MS` | `15000` | No | Recreate a disconnected Redis client after this unhealthy interval (self-heal; `0` = disabled) |
 | `UPVECTOR_METRICS` | `false` | No | Enable Prometheus `/metrics` endpoint |
 | `UPVECTOR_METRICS_TOKEN` | - | No | Optional Bearer for `GET /metrics` when metrics enabled; when unset, `/metrics` is unauthenticated |
 | `UPVECTOR_MAX_BODY_SIZE` | `33554432` | No | Max request body size in bytes (32 MiB) |
@@ -155,7 +155,8 @@ All prefixed `UPVECTOR_`:
 ## Implementation Status
 
 Phases 1-6 complete. Dense-vector CRUD + query + filtering + namespaces + production hardening + provider-backed `/upsert-data`/`/query-data`.
-475 tests passing (340 unit, 61 integration, 74 SDK compatibility), verified 2026-10-28 with Bun 1.4.4 and SDK 1.2.3 (latest). Deep audits run per `docs/workflows/deep-audit.md`; open findings tracked under the `deep-audit` issue label.
+495 tests passing (353 unit, 68 integration, 74 SDK compatibility), verified 2026-10-28 with Bun 1.4.4 and SDK 1.2.3 (latest). Deep audits run per `docs/workflows/deep-audit.md`; open findings tracked under the `deep-audit` issue label.
+Latest adversarial review: [`docs/audits/2026-10-28-astra-audit.md`](docs/audits/2026-10-28-astra-audit.md). Reads have a conservative 64 MiB projection budget; request deadlines prevent later Redis dispatch but cannot roll back issued commands. PATCH uses bounded compare-and-write retries (409 on contention).
 Production hardening includes structured JSON logging, graceful shutdown, health probes, request timeouts, Prometheus metrics (optional scrape token), body limits, binary vector round-trip protection, Redis client self-heal, and process-level error handlers.
 See `PLAN.md` for the full architecture and phase breakdown.
 

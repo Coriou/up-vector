@@ -2,7 +2,7 @@ import { Hono } from "hono"
 import { z } from "zod"
 import { ValidationError } from "../errors"
 import { getClient } from "../redis"
-import { ensureIndex, loadDimension, setDetectedDimension } from "../translate/index"
+import { ensureIndex, loadDimension } from "../translate/index"
 import { NS_REGISTRY, validateId, validateNamespace, vectorKey } from "../translate/keys"
 import { encodeVector, encodeVectorBase64, finiteNumber } from "../translate/vectors"
 
@@ -122,7 +122,6 @@ export async function upsertDenseVectors(ns: string, vectors: DenseVectorInput[]
 	// ensureIndex() throws ValidationError on dim mismatch — propagate as-is so
 	// the global error handler maps it to 400.
 	await ensureIndex(ns, dim)
-	setDetectedDimension(ns, dim)
 
 	// Upsert all vectors (auto-pipelined via Promise.all). The namespace registry
 	// SADD runs alongside the atomic upserts — both are independent and safe to

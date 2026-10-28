@@ -2,6 +2,7 @@ import type { RedisClient } from "bun"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { ValidationError } from "../errors"
+import { reserveReadProjection } from "../read-budget"
 import { getClient } from "../redis"
 import {
 	escapeGlobMeta,
@@ -47,6 +48,7 @@ const handleFetch = async (c: Context) => {
 
 	// Fetch by IDs (default path, also used when both ids and prefix are given)
 	if (parsed.ids) {
+		reserveReadProjection(parsed.ids.length, parsed)
 		const results = await Promise.all(
 			parsed.ids.map((id) => fetchVectorFields(redis, vectorKey(ns, id), parsed)),
 		)
@@ -58,6 +60,7 @@ const handleFetch = async (c: Context) => {
 		validatePrefix(parsed.prefix)
 		const pattern = `${vectorPrefix(ns)}${escapeGlobMeta(parsed.prefix)}*`
 		const keys = await scanAll(redis, pattern, 1000)
+		reserveReadProjection(keys.length, parsed)
 		const results = await Promise.all(keys.map((key) => fetchVectorFields(redis, key, parsed)))
 		return c.json({ result: results.filter(Boolean) })
 	}

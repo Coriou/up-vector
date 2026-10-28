@@ -2,6 +2,7 @@ import { config } from "../config"
 import { ValidationError } from "../errors"
 import { log } from "../logger"
 import { getClient } from "../redis"
+import { redisGeneration } from "../redis-generation"
 import { indexName, NS_REGISTRY } from "./keys"
 import { toRedisDistanceMetric } from "./scores"
 
@@ -11,12 +12,28 @@ const dimensionMap = new Map<string, number>()
 // fire two FT.CREATE commands and rely on the "Index already exists" catch.
 const pendingIndexCreations = new Map<string, Promise<void>>()
 
-export function getDetectedDimension(ns: string): number | undefined {
-	return config.dimension ?? dimensionMap.get(ns)
+let cacheGeneration = redisGeneration()
+function refreshCacheGeneration(): number {
+	const generation = redisGeneration()
+	if (cacheGeneration !== generation) {
+		knownIndexes.clear()
+		dimensionMap.clear()
+		pendingIndexCreations.clear()
+		cacheGeneration = generation
+	}
+	return generation
 }
 
-export function setDetectedDimension(ns: string, dim: number): void {
-	dimensionMap.set(ns, dim)
+function cacheIndex(ns: string, dimension: number, generation: number): void {
+	// An old client's in-flight command must not repopulate the new cache.
+	if (refreshCacheGeneration() !== generation) return
+	dimensionMap.set(ns, dimension)
+	knownIndexes.add(indexName(ns))
+}
+
+export function getDetectedDimension(ns: string): number | undefined {
+	refreshCacheGeneration()
+	return config.dimension ?? dimensionMap.get(ns)
 }
 
 /**
@@ -25,6 +42,7 @@ export function setDetectedDimension(ns: string, dim: number): void {
  * and a request hits a namespace whose dimension we don't know yet.
  */
 export async function loadDimension(ns: string): Promise<number | undefined> {
+	const generation = refreshCacheGeneration()
 	if (config.dimension !== undefined) return config.dimension
 	const cached = dimensionMap.get(ns)
 	if (cached !== undefined) return cached
@@ -44,8 +62,7 @@ export async function loadDimension(ns: string): Promise<number | undefined> {
 				config.dimension,
 				toRedisDistanceMetric(config.metric),
 			)
-			dimensionMap.set(ns, dim)
-			knownIndexes.add(idx)
+			cacheIndex(ns, dim, generation)
 			return dim
 		}
 	} catch (err) {
@@ -57,6 +74,7 @@ export async function loadDimension(ns: string): Promise<number | undefined> {
 }
 
 export async function ensureIndex(ns: string, dimension: number): Promise<void> {
+	const generation = refreshCacheGeneration()
 	const idx = indexName(ns)
 	if (knownIndexes.has(idx)) {
 		const cached = dimensionMap.get(ns)
@@ -70,11 +88,9 @@ export async function ensureIndex(ns: string, dimension: number): Promise<void> 
 	const pending = pendingIndexCreations.get(idx)
 	if (pending) {
 		await pending
-		const cached = dimensionMap.get(ns)
-		if (cached !== undefined && cached !== dimension) {
-			throw new ValidationError(`Dimension mismatch: namespace expects ${cached}, got ${dimension}`)
-		}
-		return
+		// Reconnect can discard the creator's cache write. Re-enter validation
+		// so a missing cache never authorizes a different-dimensional writer.
+		return ensureIndex(ns, dimension)
 	}
 
 	const promise = createIndexInternal(ns, dimension, idx)
@@ -82,11 +98,15 @@ export async function ensureIndex(ns: string, dimension: number): Promise<void> 
 	try {
 		await promise
 	} finally {
-		pendingIndexCreations.delete(idx)
+		if (pendingIndexCreations.get(idx) === promise) pendingIndexCreations.delete(idx)
 	}
+	// The creating request also needs validation against the current connection,
+	// even though its old completion was correctly prevented from caching.
+	if (refreshCacheGeneration() !== generation) return ensureIndex(ns, dimension)
 }
 
 async function createIndexInternal(ns: string, dimension: number, idx: string): Promise<void> {
+	const generation = refreshCacheGeneration()
 	const redis = getClient()
 	const prefix = `v:${ns}:`
 
@@ -141,12 +161,10 @@ async function createIndexInternal(ns: string, dimension: number, idx: string): 
 			// compare against what we would have created.
 			toRedisDistanceMetric(config.metric),
 		)
-		dimensionMap.set(ns, actualDim)
-		knownIndexes.add(idx)
+		cacheIndex(ns, actualDim, generation)
 		return
 	}
-	knownIndexes.add(idx)
-	dimensionMap.set(ns, dimension)
+	cacheIndex(ns, dimension, generation)
 }
 
 function isMissingIndexError(msg: string): boolean {
@@ -160,6 +178,7 @@ function isMissingIndexError(msg: string): boolean {
 }
 
 export async function dropIndex(ns: string): Promise<void> {
+	const generation = refreshCacheGeneration()
 	const idx = indexName(ns)
 	const redis = getClient()
 
@@ -172,8 +191,10 @@ export async function dropIndex(ns: string): Promise<void> {
 		}
 	}
 
-	knownIndexes.delete(idx)
-	dimensionMap.delete(ns)
+	if (refreshCacheGeneration() === generation) {
+		knownIndexes.delete(idx)
+		dimensionMap.delete(ns)
+	}
 }
 
 function isUnknownCommandError(msg: string): boolean {
@@ -182,6 +203,7 @@ function isUnknownCommandError(msg: string): boolean {
 }
 
 export async function syncIndexes(): Promise<void> {
+	const generation = refreshCacheGeneration()
 	const redis = getClient()
 	let indexes: string[] = []
 	try {
@@ -215,8 +237,7 @@ export async function syncIndexes(): Promise<void> {
 				toRedisDistanceMetric(config.metric),
 			)
 			if (dim !== undefined) {
-				dimensionMap.set(ns, dim)
-				knownIndexes.add(idx)
+				cacheIndex(ns, dim, generation)
 			}
 		} catch (err) {
 			// Index may have been dropped between _LIST and INFO; a

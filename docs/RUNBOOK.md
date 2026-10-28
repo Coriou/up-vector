@@ -17,13 +17,16 @@ Principles:
 - Every automated signal lands as an issue with a stable label. No signal lives
   only in a log nobody reads.
 
-Verified baseline (2026-10-28): **475 tests** — 340 unit / 61 integration /
-74 SDK compatibility — green locally on Bun 1.4.0 and latest 1.4.4, Redis Stack
-`7.4.0-v8` (Redis 7.4.7), SDK 1.2.3 (registry latest), Hono 4.13.14, Zod 4.6.7.
-`bun audit --json` returns `{}`. Bun CI and Docker pins moved to **1.4.4 only
-after the full canary passed**. Redis `latest` has the identical digest as the
-existing pin; Redis pin unchanged. Remote PR CI is a separate check.
-Full evidence, PR25 reconciliation, advisory triage, and open risks:
+Verified baseline (2026-10-28, Astra follow-up): **495 tests** — 353 unit /
+68 integration / 74 SDK compatibility — green locally on pinned Bun **1.4.4**,
+Redis Stack `7.4.0-v8` (Redis 7.4.7), SDK 1.2.3, Hono 4.13.14, Zod 4.6.7.
+Typecheck, lint, build, `bun audit --json` (`{}`), and production Docker smoke
+passed. The untouched `5be3db9` baseline had 475 passing tests. The earlier
+maintenance pass also tested Bun 1.4.0; this follow-up does not claim that
+runtime was retested. Remote PR CI remains a separate release gate.
+Evidence and release limitations:
+[`audits/2026-10-28-astra-audit.md`](audits/2026-10-28-astra-audit.md).
+Dependency/advisory reconciliation remains in the historical
 [`audits/2026-10-28-maintenance.md`](audits/2026-10-28-maintenance.md).
 Historical baseline: 465 tests in September's audit, 444 after August's fixes,
 383 at runbook creation.
@@ -86,8 +89,8 @@ Before tagging or publishing any release:
 
 - [ ] `./scripts/test-all.sh` fully green; record counts in the release notes
 - [ ] `bun audit --json` clean
-- [ ] Latest weekly `compat.yml` + `maintenance.yml` runs green (re-run via
-      `workflow_dispatch` if stale)
+- [ ] Latest `test.yml`, `compat.yml`, and `maintenance.yml` runs for the exact
+      final main SHA green (dispatch missing runs; older green SHAs do not qualify)
 - [ ] Docker build + `./scripts/docker-smoke.sh` green (assert health, auth, stored query result)
 - [ ] `README.md` / `CLAUDE.md` env tables and test counts still truthful
 
@@ -115,3 +118,59 @@ Bun, Redis Stack). Past runs land in `docs/audits/` — latest:
 [2026-09-06](./audits/2026-09-06-deep-audit.md) (17 raw findings, 12
 survivors, 8 fixed in-pass with regression tests, 3 open issues #22 #23
 #24, 5 refuted).
+
+## Manual GHCR publication
+
+`publish.yml` publishes **linux/amd64 only**, using the repository's automatic
+`GITHUB_TOKEN` with `contents: read`, `actions: read`, and `packages: write`.
+No personal token or npm publication is needed. It runs only on manual dispatch
+from `main`, checks out the exact dispatch SHA, and serializes publications.
+It builds locally and runs `scripts/docker-smoke.sh` on that exact image before
+registry login. OCI source/revision labels identify the repository and commit.
+
+After merging an approved PR, record the final main SHA and dispatch the gates:
+
+```sh
+gh api repos/Coriou/up-vector/git/ref/heads/main --jq '.object.sha'
+gh workflow run test.yml --repo Coriou/up-vector --ref main
+gh workflow run compat.yml --repo Coriou/up-vector --ref main
+gh workflow run maintenance.yml --repo Coriou/up-vector --ref main
+```
+
+Inspect the runs in Actions (or `gh run list --repo Coriou/up-vector --branch main
+--commit <full-main-sha>`). **Test**, **SDK Compatibility (latest)**, and
+**Maintenance** must each have their latest run for that same SHA completed with
+`success`. PR merge-ref checks and older green commits do not qualify. If main
+moves, repeat for the new SHA. No workflow waits for gates: missing, pending,
+failed, or cancelled runs cause a clear publication failure before any push.
+
+Only after all three gates are green, dispatch:
+
+```sh
+gh workflow run publish.yml --repo Coriou/up-vector --ref main
+```
+
+The workflow rechecks gates/main after smoke, pushes `sha-<full-40-character-sha>`
+and then `latest`, and records the GHCR `sha256` digest in its step summary.
+Tags are mutable; deploy the recorded `ghcr.io/coriou/up-vector@sha256:...`
+reference when immutable identity matters. Pushes are not transactional: if
+`latest` fails after the SHA tag succeeds, the summary still records the digest.
+No Git version tag or GitHub release is created. Concurrent commits to main can
+still occur after the final check; keep main stable during publication.
+
+For the first publication, check package visibility in GitHub Packages and set
+it to public if needed for anonymous pulls promised by the deployment example.
+If the package already exists, grant this repository Actions access to it; do
+not work around missing package permissions by adding a personal token. A green
+workflow plus its registry digest establishes publication; this runbook does
+not claim the image has already been published.
+
+To reproduce the local artifact check on an amd64 Docker host at the target SHA:
+
+```sh
+docker build --platform linux/amd64 -t up-vector:release-check .
+./scripts/docker-smoke.sh up-vector:release-check 7.4.0-v8
+```
+
+The gate script uses GitHub's [workflow-run API](https://docs.github.com/en/rest/actions/workflow-runs#list-workflow-runs-for-a-workflow);
+token-based publication follows GitHub's [GHCR guidance](https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images).

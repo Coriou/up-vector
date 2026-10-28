@@ -111,3 +111,23 @@ describe("FT.SEARCH field projection", () => {
 		expect(fields).toEqual(["_score", "metadata", "_vec", "data"])
 	})
 })
+
+test("oversized projected query responses are rejected before FT.SEARCH", async () => {
+	const { Hono } = await import("hono")
+	const { queryRoutes } = await import("../../src/routes/query")
+	const { errorHandler } = await import("../../src/middleware/error-handler")
+	const { timeoutMiddleware } = await import("../../src/middleware/timeout")
+	send = async (command) =>
+		command === "FT.INFO"
+			? { attributes: [{ dim: 16384, distance_metric: "COSINE" }] }
+			: { results: [] }
+	const app = new Hono().onError(errorHandler).use("*", timeoutMiddleware).route("/", queryRoutes)
+	const before = searchArgs.length
+	const response = await app.request("/query/large-projection", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ vector: Array(16384).fill(0.1), topK: 1000, includeVectors: true }),
+	})
+	expect(response.status).toBe(400)
+	expect(searchArgs.length).toBe(before)
+})

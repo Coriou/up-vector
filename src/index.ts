@@ -2,7 +2,7 @@ import { config } from "./config"
 import { log } from "./logger"
 import { closeRedis, initRedis, isRedisHealthy, reinitRedis } from "./redis"
 import { app } from "./server"
-import { setShuttingDown } from "./shutdown"
+import { setShuttingDown, shuttingDown } from "./shutdown"
 import { syncIndexes } from "./translate/index"
 
 /** Redact credentials from a Redis URL for safe logging */
@@ -121,10 +121,10 @@ async function main(): Promise<void> {
 		let busy = false
 		const intervalMs = Math.min(5000, config.redisReinitAfterMs)
 		const watchdog = setInterval(async () => {
-			if (busy) return
+			if (busy || shuttingDown()) return
 			busy = true
 			try {
-				if (await isRedisHealthy()) {
+				if ((await isRedisHealthy()) || shuttingDown()) {
 					unhealthySince = null
 					return
 				}
@@ -134,12 +134,11 @@ async function main(): Promise<void> {
 					return
 				}
 				if (now - unhealthySince >= config.redisReinitAfterMs) {
-					log.warn("redis unhealthy past threshold, recreating client", {
+					log.warn("redis unhealthy past threshold, checking disconnected client recovery", {
 						unhealthy_ms: now - unhealthySince,
 					})
 					try {
-						await reinitRedis()
-						log.info("redis client reinitialized after outage")
+						if (await reinitRedis()) log.info("redis client reinitialized after outage")
 						unhealthySince = null
 					} catch (err: unknown) {
 						const msg = err instanceof Error ? err.message : String(err)

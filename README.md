@@ -147,7 +147,7 @@ curl -X POST http://localhost:8080/query-data \
 
 ## API Compatibility
 
-Implements the dense-vector subset of the [Upstash Vector REST API](https://upstash.com/docs/vector/api/endpoints), plus dense `/upsert-data` and `/query-data` through a configurable embedding provider. Validated by 475 tests including 74 using the real `@upstash/vector` SDK.
+Implements the dense-vector subset of the [Upstash Vector REST API](https://upstash.com/docs/vector/api/endpoints), plus dense `/upsert-data` and `/query-data` through a configurable embedding provider. Validated by 495 tests including 74 using the real `@upstash/vector` SDK.
 
 | Surface | Status | Notes |
 |----------|--------|-------|
@@ -223,7 +223,7 @@ All environment variables are prefixed `UPVECTOR_`:
 | `UPVECTOR_LOG_FORMAT` | `json` | Log format: `json` (structured) or `text` (human-readable) |
 | `UPVECTOR_SHUTDOWN_TIMEOUT` | `30000` | Max milliseconds to wait for request drain on shutdown |
 | `UPVECTOR_REQUEST_TIMEOUT` | `30000` | Per-request timeout in milliseconds (`0` = disabled) |
-| `UPVECTOR_REDIS_REINIT_AFTER_MS` | `15000` | Recreate the Redis client after it has been continuously unhealthy this long, so the proxy self-heals in-process once Redis returns (`0` = disabled) |
+| `UPVECTOR_REDIS_REINIT_AFTER_MS` | `15000` | Recreate a disconnected Redis client after this unhealthy interval (`0` = disabled). Slow connected clients are left to recover |
 | `UPVECTOR_METRICS` | `false` | Enable Prometheus metrics at `GET /metrics` |
 | `UPVECTOR_METRICS_TOKEN` | — | Optional. When set (and metrics enabled), `GET /metrics` requires `Authorization: Bearer <token>`. When unset, `/metrics` is unauthenticated (Prometheus-friendly). Prefer network policy or this token if the port is public. |
 | `UPVECTOR_MAX_BODY_SIZE` | `33554432` | Max request body size in bytes |
@@ -240,6 +240,13 @@ Operational caveats for `/upsert-data` and `/query-data`:
 - `UPVECTOR_EMBEDDING_DIMENSION` must match `UPVECTOR_DIMENSION` when both are set.
 - Existing namespaces keep their original dense dimension; raw-text queries/upserts fail loudly if the provider returns a different dimension.
 - `fake` embeddings are deterministic but not semantically meaningful. They exist so CI and local tests do not need API keys.
+
+Read and mutation safety limits:
+
+- Query (including `/query-data` batches), fetch, and range reserve a **64 MiB projected read budget per request** before bulk field reads. Estimates use maximum legal metadata/data sizes, JSON escaping, and vector dimensions (the maximum dimension for fetch/range). This can reject small actual responses conservatively with HTTP 400. Reduce `topK`, page/ID/batch size, or include flags; fields are never silently truncated. Filtering candidates also consume the budget.
+- A request deadline stops subsequent Redis commands, including late destructive continuations. Commands already dispatched or queued in Bun/Redis can still finish; HTTP 504 is **not rollback**. Body upload deadlines and overall concurrency limits still belong at the ingress proxy.
+- Metadata PATCH preserves JSON arrays, objects, and numbers. Concurrent metadata changes retry an atomic compare-and-write up to eight times, then return HTTP 409 for the caller to retry. A rejected oversized merge writes none of the requested fields.
+- Index/dimension caches are invalidated on Redis client replacement and automatic reconnect. Manual `FLUSHALL` or index removal on an unchanged connection still requires a process restart. Coordinate reset/rename with writers: these multi-command operations are not isolated from concurrent upserts.
 
 ## Health & Monitoring
 
@@ -302,12 +309,12 @@ bun run typecheck        # TypeScript check
 
 ### Testing
 
-475 tests across three tiers:
+495 tests across three tiers:
 
 | Tier | Tests | Purpose |
 |------|-------|---------|
-| **Unit** | 340 | Filter parser, embedding providers, vector encode/decode, score normalization, key naming, middleware/config hardening, route validation |
-| **Integration** | 61 | End-to-end REST behavior against Redis Stack, including raw-text data endpoints |
+| **Unit** | 353 | Filter parser, embedding providers, vector encode/decode, score normalization, key naming, middleware/config hardening, route validation |
+| **Integration** | 68 | End-to-end REST behavior against Redis Stack, including raw-text data endpoints |
 | **SDK Compatibility** | 74 | Real `@upstash/vector` SDK against up-vector |
 
 ```bash
@@ -318,13 +325,19 @@ The test script honors `UPVECTOR_REDIS_PORT` and `UPVECTOR_PORT`, and otherwise 
 
 The local gate uses an isolated Compose project and disposable Redis volume, probes readiness, and removes only its own resources. Run `docker build -t up-vector:smoke . && ./scripts/docker-smoke.sh` to verify the production artifact (health, auth, upsert, and indexed query assertions). CI runs this smoke test on code PRs and weekly.
 
-Maintenance verified on 2026-10-28: Bun 1.4.4, Redis Stack `7.4.0-v8` (Redis 7.4.7), `@upstash/vector` 1.2.3 (registry latest). See [the dated audit](docs/audits/2026-10-28-maintenance.md) for dependency/security results and outstanding risks. Explicit-ID fetch/delete requests are capped at 1000 IDs for resource safety; split larger requests into batches.
+Maintenance verified on 2026-10-28: Bun 1.4.4, Redis Stack `7.4.0-v8` (Redis 7.4.7), `@upstash/vector` 1.2.3 (registry latest). See the [maintenance audit](docs/audits/2026-10-28-maintenance.md) for dependency/security results and the [Astra adversarial audit](docs/audits/2026-10-28-astra-audit.md) for subsequent fixes, evidence, and remaining risks. Explicit-ID fetch/delete requests are capped at 1000 IDs for resource safety; split larger requests into batches.
 
 The compatibility tests are the ultimate validation — they use the actual `@upstash/vector` TypeScript SDK, exercising the exact HTTP paths and request formats that production apps use. A weekly CI job also tests against the latest SDK version to catch incompatibilities early.
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup and contribution guidelines.
 
 ## Deployment
+
+The GHCR publication workflow is manually dispatched after all release gates pass
+for the same main commit. It publishes `ghcr.io/coriou/up-vector:latest` and
+`sha-<full-commit-sha>` for **linux/amd64 only**. See the
+[publication runbook](docs/RUNBOOK.md#manual-ghcr-publication) for dispatch,
+package visibility, and immutable digest deployment instructions.
 
 ### Docker Compose (standalone)
 
