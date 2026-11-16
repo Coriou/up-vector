@@ -11,7 +11,7 @@
       "devDependencies": {
         "@biomejs/biome": "^2.6.3",
         "@types/bun": "^1.4.4",
-        "@upstash/vector": "^1.2.3",
+        "@upstash/vector": "^1.2.4",
         "typescript": "^6.0.3",
       },
     },
@@ -43,7 +43,7 @@
 
     "@types/node": ["@types/node@25.5.0", "", { "dependencies": { "undici-types": "~7.18.0" } }, "sha512-jp2P3tQMSxWugkCUKLRPVUpGaL5MVFwF8RDuSRztfwgN1wmqJeMSbKlnEtQqU8UrhTmzEmZdu2I6v2dpp7XIxw=="],
 
-    "@upstash/vector": ["@upstash/vector@1.2.3", "", {}, "sha512-yXsWKeuHNYyH72BcSZd3bV5ZD5MybAoTvKxkMaeV2UzuGfNzbHBVh5eO+ysTWTFAf8I9XcOueF4tZfAGjCa4Iw=="],
+    "@upstash/vector": ["@upstash/vector@1.2.4", "", {}, "sha512-c/crHiEFI/NA/BjgMwTNxrGKJ/USzIlOJTNF9cZZ5lX48gw/1YXNjEdhXUe/Rq3ua3LeQojqIdJQnprTV3F7Ww=="],
 
     "bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
 
